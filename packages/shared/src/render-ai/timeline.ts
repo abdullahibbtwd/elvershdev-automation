@@ -1,4 +1,4 @@
-import type { RenderSettingsInput, SubtitleStyleInput } from './schemas';
+import type { RenderSettings, RenderSettingsInput, SubtitleStyle } from './schemas';
 import { audioMixSettingsSchema, renderSettingsSchema, subtitleStyleSchema } from './schemas';
 
 export type TransitionType = 'none' | 'fade' | 'crossfade';
@@ -64,7 +64,7 @@ export interface RenderTimeline {
   sceneCount: number;
   scenes: PlannedTimelineScene[];
   subtitleCues: SubtitleCue[];
-  settings: RenderSettingsInput;
+  settings: RenderSettings;
   timingStrategy: 'narration_driven';
   timingNotes: string[];
 }
@@ -82,7 +82,7 @@ export function splitNarrationIntoSubtitleSegments(
   text: string,
   startSeconds: number,
   durationSeconds: number,
-  style: SubtitleStyleInput,
+  style: SubtitleStyle,
   sceneId: string,
   sequence: number,
   startIndex: number,
@@ -180,7 +180,7 @@ export function hexToAssColor(hex: string, alpha = 0): string {
   return `&H${a}${b}${g}${r}`.toUpperCase();
 }
 
-export function buildAss(cues: SubtitleCue[], style: SubtitleStyleInput, playResX: number, playResY: number): string {
+export function buildAss(cues: SubtitleCue[], style: SubtitleStyle, playResX: number, playResY: number): string {
   const alignmentMap = { bottom: 2, center: 5, top: 8 } as const;
   const primary = hexToAssColor(style.primaryColor, 0);
   const outline = hexToAssColor(style.outlineColor, 0);
@@ -224,7 +224,7 @@ function formatAssTime(seconds: number): string {
 
 export function planRenderTimeline(
   scenes: TimelineSceneInput[],
-  partialSettings?: Partial<RenderSettingsInput>,
+  partialSettings?: RenderSettingsInput,
 ): RenderTimeline {
   const settings = renderSettingsSchema.parse(partialSettings ?? {});
   const audioMix = audioMixSettingsSchema.parse(settings.audioMix ?? {});

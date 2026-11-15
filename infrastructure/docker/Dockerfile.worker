@@ -17,6 +17,7 @@ FROM deps AS build
 COPY packages ./packages
 COPY apps/worker ./apps/worker
 COPY apps/api/prisma ./apps/api/prisma
+COPY apps/api/prisma.config.ts ./apps/api/prisma.config.ts
 RUN pnpm --filter @ai-video/shared build
 WORKDIR /app/apps/api
 RUN pnpm exec prisma generate

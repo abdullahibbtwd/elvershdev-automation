@@ -6,7 +6,7 @@
  *
  * Usage: pnpm --filter @ai-video/api exec ts-node -r tsconfig-paths/register scripts/phase11-mock-analytics-demo.ts
  */
-import { PrismaClient, PublishStatus, SocialPlatform, VideoRenderStatus } from '@prisma/client';
+import { PublishStatus, SocialPlatform, VideoRenderStatus } from '@prisma/client';
 import {
   calculateEngagementRate,
   metricValueOrNull,
@@ -14,8 +14,14 @@ import {
   toAvailabilityMap,
 } from '@ai-video/shared';
 import { mockPostAnalytics } from '../src/integrations/analytics/mock-analytics';
+import { createPrismaClient } from '../src/prisma/create-prisma-client';
+import { config as loadEnv } from 'dotenv';
+import { resolve } from 'node:path';
 
-const prisma = new PrismaClient();
+loadEnv({ path: resolve(__dirname, '../../../.env') });
+loadEnv({ path: resolve(__dirname, '../.env'), override: true });
+
+const prisma = createPrismaClient();
 
 function section(title: string) {
   console.log(`\n=== ${title} ===`);

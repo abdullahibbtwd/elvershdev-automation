@@ -62,13 +62,16 @@ describe('MotionService', () => {
         findFirst: jest.fn().mockResolvedValue(null),
         findMany: jest.fn().mockResolvedValue([]),
         count: jest.fn().mockResolvedValue(0),
-        create: jest.fn().mockImplementation(async ({ data }) => ({
+        create: jest.fn().mockImplementation(async ({ data }: { data: Record<string, unknown> }) => ({
           id: 'motion-1',
           ...data,
           createdAt: new Date(),
           updatedAt: new Date(),
         })),
-        update: jest.fn().mockImplementation(async ({ data }) => ({ id: 'motion-1', ...data })),
+        update: jest.fn().mockImplementation(async ({ data }: { data: Record<string, unknown> }) => ({
+          id: 'motion-1',
+          ...data,
+        })),
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
       generationJob: {
@@ -90,8 +93,11 @@ describe('MotionService', () => {
       providerUsage: {
         findMany: jest.fn().mockResolvedValue([]),
       },
-      $transaction: jest.fn(async (fn: (tx: unknown) => Promise<unknown>) => fn(prisma)),
+      $transaction: jest.fn(),
     };
+    prisma.$transaction.mockImplementation(async (fn: (tx: typeof prisma) => Promise<unknown>) =>
+      fn(prisma),
+    );
 
     const queueService = {
       enqueueGenerationJob:

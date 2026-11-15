@@ -14,14 +14,15 @@ import { config as loadEnv } from 'dotenv';
 import { createCipheriv, createHash, randomBytes } from 'node:crypto';
 import { resolve } from 'node:path';
 import axios from 'axios';
-import { PrismaClient, SocialPlatform } from '@prisma/client';
+import { SocialPlatform } from '@prisma/client';
 import { DEFAULT_CAPABILITIES } from '@ai-video/shared';
 import { INSTAGRAM_SCOPES, META_PAGE_SCOPES } from '../src/integrations/social/social-publishing.types';
+import { createPrismaClient } from '../src/prisma/create-prisma-client';
 
 loadEnv({ path: resolve(__dirname, '../../../.env') });
 loadEnv({ path: resolve(__dirname, '../.env'), override: true });
 
-const prisma = new PrismaClient();
+const prisma = createPrismaClient();
 
 function encrypt(plaintext: string, rawKey: string): string {
   const key = createHash('sha256').update(rawKey).digest();

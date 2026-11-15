@@ -12,7 +12,7 @@ import {
   QUEUE_NAMES,
   renderSettingsSchema,
   VIDEO_OUTPUT_PROFILES,
-  type RenderSettingsInput,
+  type RenderSettings,
   type TimelineSceneInput,
   type VideoRenderQueuePayload,
 } from '@ai-video/shared';
@@ -541,7 +541,7 @@ export class RenderingService {
     };
   }
 
-  private parseSettings(dto: CreateRenderDto | UpdateRenderSettingsDto): RenderSettingsInput {
+  private parseSettings(dto: CreateRenderDto | UpdateRenderSettingsDto): RenderSettings {
     return renderSettingsSchema.parse({
       profileId: dto.profileId ?? DEFAULT_VIDEO_OUTPUT_PROFILE_ID,
       subtitleEnabled: dto.subtitleEnabled,

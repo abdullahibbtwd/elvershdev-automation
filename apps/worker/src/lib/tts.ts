@@ -1,4 +1,4 @@
-import { GoogleGenAI } from '@google/genai';
+import { GoogleGenAI } from './google-genai';
 import {
   createMockWavBuffer,
   DEFAULT_GEMINI_TTS_VOICE,

@@ -15,7 +15,7 @@ import {
   type NarrationPlanningInput,
   type PlannedNarrationScript,
 } from '@ai-video/shared';
-import { GoogleGenAI } from '@google/genai';
+import { GoogleGenAI } from '../lib/google-genai';
 import type { Logger } from '../lib/logger';
 import { getPrisma } from '../lib/prisma';
 

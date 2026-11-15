@@ -43,8 +43,11 @@ describe('VisualsService', () => {
         update: jest.fn(),
         findMany: jest.fn(),
       },
-      $transaction: jest.fn(async (cb: (tx: unknown) => Promise<unknown>) => cb(prisma)),
+      $transaction: jest.fn(),
     };
+    prisma.$transaction.mockImplementation(async (cb: (tx: typeof prisma) => Promise<unknown>) =>
+      cb(prisma),
+    );
 
     const queueService = {
       enqueueGenerationJob: jest.fn(),
@@ -149,7 +152,8 @@ describe('VisualsService', () => {
       queueName: 'visual-analysis',
       job: { id: 'job-1' },
     });
-    prisma.generationJob.update.mockImplementation(async ({ data }) => ({
+    prisma.generationJob.update.mockImplementation(
+      async ({ data }: { data: { status?: JobStatus; queueJobId?: string | null } }) => ({
       id: 'job-1',
       userId: 'user-1',
       videoProjectId: null,
@@ -240,7 +244,8 @@ describe('VisualsService', () => {
       queueName: 'image-generation',
       job: { id: 'job-2' },
     });
-    prisma.generationJob.update.mockImplementation(async ({ data }) => ({
+    prisma.generationJob.update.mockImplementation(
+      async ({ data }: { data: { status?: JobStatus; queueJobId?: string | null } }) => ({
       id: 'job-2',
       userId: 'user-1',
       videoProjectId: null,

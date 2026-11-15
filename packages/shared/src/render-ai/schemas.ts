@@ -58,8 +58,17 @@ export const updateVideoRenderSettingsSchema = renderSettingsSchema.partial().ex
   backgroundMusicAssetId: z.string().uuid().nullable().optional(),
 });
 
-export type SubtitleStyleInput = z.infer<typeof subtitleStyleSchema>;
-export type AudioMixSettingsInput = z.infer<typeof audioMixSettingsSchema>;
-export type RenderSettingsInput = z.infer<typeof renderSettingsSchema>;
+/** Parsed/output shapes (defaults applied). */
+export type SubtitleStyle = z.infer<typeof subtitleStyleSchema>;
+export type AudioMixSettings = z.infer<typeof audioMixSettingsSchema>;
+export type RenderSettings = z.infer<typeof renderSettingsSchema>;
 export type CreateVideoRenderInput = z.infer<typeof createVideoRenderSchema>;
 export type UpdateVideoRenderSettingsInput = z.infer<typeof updateVideoRenderSettingsSchema>;
+
+/**
+ * Pre-parse input shapes. Fields with Zod defaults are optional, including nested
+ * `audioMix` / `subtitleStyle` — safe for Partial-like callers and `schema.parse()`.
+ */
+export type SubtitleStyleInput = z.input<typeof subtitleStyleSchema>;
+export type AudioMixSettingsInput = z.input<typeof audioMixSettingsSchema>;
+export type RenderSettingsInput = z.input<typeof renderSettingsSchema>;
