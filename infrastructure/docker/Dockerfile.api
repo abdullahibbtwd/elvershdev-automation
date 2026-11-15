@@ -1,0 +1,40 @@
+FROM node:20-bookworm-slim AS base
+RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
+WORKDIR /app
+
+FROM base AS deps
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml* turbo.json ./
+COPY packages/config/package.json packages/config/
+COPY packages/shared/package.json packages/shared/
+COPY apps/api/package.json apps/api/
+RUN pnpm install --frozen-lockfile=false
+
+FROM deps AS build
+COPY packages ./packages
+COPY apps/api ./apps/api
+RUN pnpm --filter @ai-video/shared build
+WORKDIR /app/apps/api
+RUN pnpm exec prisma generate
+RUN pnpm build
+
+FROM node:20-bookworm-slim AS runner
+WORKDIR /app
+ENV NODE_ENV=production
+RUN corepack enable && corepack prepare pnpm@9.15.0 --activate \
+  && apt-get update \
+  && apt-get install -y --no-install-recommends curl ca-certificates \
+  && rm -rf /var/lib/apt/lists/* \
+  && groupadd --system --gid 1001 aivideo \
+  && useradd --system --uid 1001 --gid aivideo --create-home aivideo
+
+COPY --from=build --chown=aivideo:aivideo /app/package.json /app/pnpm-workspace.yaml ./
+COPY --from=build --chown=aivideo:aivideo /app/node_modules ./node_modules
+COPY --from=build --chown=aivideo:aivideo /app/packages ./packages
+COPY --from=build --chown=aivideo:aivideo /app/apps/api ./apps/api
+
+USER aivideo
+WORKDIR /app/apps/api
+EXPOSE 3000
+HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
+  CMD curl -fsS http://127.0.0.1:3000/api/health/live || exit 1
+CMD ["node", "dist/main.js"]

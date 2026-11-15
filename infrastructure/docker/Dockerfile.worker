@@ -1,0 +1,51 @@
+FROM node:20-bookworm-slim AS base
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends ffmpeg \
+  && rm -rf /var/lib/apt/lists/*
+RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
+WORKDIR /app
+
+FROM base AS deps
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml* turbo.json ./
+COPY packages/config/package.json packages/config/
+COPY packages/shared/package.json packages/shared/
+COPY apps/worker/package.json apps/worker/
+COPY apps/api/package.json apps/api/
+RUN pnpm install --frozen-lockfile=false
+
+FROM deps AS build
+COPY packages ./packages
+COPY apps/worker ./apps/worker
+COPY apps/api/prisma ./apps/api/prisma
+RUN pnpm --filter @ai-video/shared build
+WORKDIR /app/apps/api
+RUN pnpm exec prisma generate
+WORKDIR /app
+RUN pnpm --filter @ai-video/worker build
+
+FROM node:20-bookworm-slim AS runner
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends ffmpeg curl ca-certificates \
+  && rm -rf /var/lib/apt/lists/* \
+  && groupadd --system --gid 1001 aivideo \
+  && useradd --system --uid 1001 --gid aivideo --create-home aivideo
+WORKDIR /app
+ENV NODE_ENV=production
+ENV FFMPEG_PATH=ffmpeg
+ENV FFPROBE_PATH=ffprobe
+ENV WORKER_HEALTH_PORT=3101
+
+COPY --from=build --chown=aivideo:aivideo /app/package.json /app/pnpm-workspace.yaml ./
+COPY --from=build --chown=aivideo:aivideo /app/node_modules ./node_modules
+COPY --from=build --chown=aivideo:aivideo /app/packages ./packages
+COPY --from=build --chown=aivideo:aivideo /app/apps/worker ./apps/worker
+COPY --from=build --chown=aivideo:aivideo /app/apps/api/prisma ./apps/api/prisma
+# Prisma client lives under pnpm's nested store; full node_modules copy above is enough.
+
+USER aivideo
+WORKDIR /app/apps/worker
+EXPOSE 3101
+HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
+  CMD curl -fsS http://127.0.0.1:${WORKER_HEALTH_PORT:-3101}/health/live || exit 1
+STOPSIGNAL SIGTERM
+CMD ["node", "dist/main.js"]

@@ -1,0 +1,36 @@
+{$DOMAIN:localhost} {
+  encode gzip zstd
+
+  header {
+    Strict-Transport-Security "max-age=31536000; includeSubDomains"
+    X-Content-Type-Options "nosniff"
+    X-Frame-Options "DENY"
+    Referrer-Policy "strict-origin-when-cross-origin"
+    -Server
+  }
+
+  # Public API
+  handle /api/* {
+    reverse_proxy api:3000
+  }
+
+  # Swagger (disable via SWAGGER_ENABLED=false in API; still block if exposed)
+  handle /docs* {
+    reverse_proxy api:3000
+  }
+
+  # Public media for social providers (presigned path-style URLs via MinIO gateway)
+  handle /media-proxy/* {
+    uri strip_prefix /media-proxy
+    reverse_proxy minio:9000
+  }
+
+  handle {
+    reverse_proxy web:8080
+  }
+
+  log {
+    output stdout
+    format json
+  }
+}

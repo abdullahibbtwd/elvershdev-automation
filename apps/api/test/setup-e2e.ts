@@ -1,0 +1,11 @@
+process.env.NODE_ENV = 'test';
+process.env.GEMINI_USE_MOCK = 'true';
+process.env.GEMINI_TTS_USE_MOCK = 'true';
+process.env.FAL_USE_MOCK = 'true';
+process.env.KLING_USE_MOCK = 'true';
+process.env.SOCIAL_USE_MOCK = 'true';
+process.env.FACEBOOK_USE_MOCK = 'true';
+process.env.INSTAGRAM_USE_MOCK = 'true';
+process.env.TIKTOK_USE_MOCK = 'true';
+process.env.YOUTUBE_USE_MOCK = 'true';
+process.env.AUTOMATION_CRON_DISABLED = 'true';

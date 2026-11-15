@@ -1,0 +1,151 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: aivideo-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-aivideo}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-aivideo}
+      POSTGRES_DB: ${POSTGRES_DB:-aivideo}
+    ports:
+      - "${POSTGRES_PORT:-5433}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-aivideo} -d ${POSTGRES_DB:-aivideo}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - aivideo
+
+  redis:
+    image: redis:7-alpine
+    container_name: aivideo-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - aivideo
+
+  minio:
+    image: minio/minio:RELEASE.2024-12-18T13-15-44Z
+    container_name: aivideo-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-minioadmin}
+    ports:
+      - "${MINIO_API_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - aivideo
+
+  # Bucket creation is handled by StorageService.ensureBucket() in the API.
+  # Optionally create manually via MinIO console at http://localhost:9001
+
+  api:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/Dockerfile.api
+    container_name: aivideo-api
+    restart: unless-stopped
+    stop_grace_period: 30s
+    profiles: ["apps"]
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-aivideo}:${POSTGRES_PASSWORD:-aivideo}@postgres:5432/${POSTGRES_DB:-aivideo}?schema=public
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      MINIO_ENDPOINT: http://minio:9000
+    ports:
+      - "${PORT:-3000}:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:3000/api/health/live"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+    networks:
+      - aivideo
+
+  worker:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/Dockerfile.worker
+    container_name: aivideo-worker
+    restart: unless-stopped
+    stop_grace_period: 120s
+    profiles: ["apps"]
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-aivideo}:${POSTGRES_PASSWORD:-aivideo}@postgres:5432/${POSTGRES_DB:-aivideo}?schema=public
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      MINIO_ENDPOINT: http://minio:9000
+      WORKER_HEALTH_PORT: 3101
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:3101/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+    networks:
+      - aivideo
+
+  web:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/Dockerfile.web
+      args:
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:3000/api}
+    container_name: aivideo-web
+    restart: unless-stopped
+    profiles: ["apps"]
+    ports:
+      - "${WEB_PORT:-5173}:80"
+    depends_on:
+      - api
+    networks:
+      - aivideo
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:
+
+networks:
+  aivideo:
+    driver: bridge

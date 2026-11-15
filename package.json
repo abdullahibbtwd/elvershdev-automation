@@ -1,0 +1,35 @@
+{
+  "name": "ai-video-platform",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AI Video Automation Platform",
+  "packageManager": "pnpm@9.15.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md}\"",
+    "db:generate": "pnpm --filter @ai-video/api exec prisma generate",
+    "db:migrate": "pnpm --filter @ai-video/api exec prisma migrate dev",
+    "db:deploy": "pnpm --filter @ai-video/api exec prisma migrate deploy",
+    "db:push": "pnpm --filter @ai-video/api exec prisma db push",
+    "db:studio": "pnpm --filter @ai-video/api exec prisma studio",
+    "test": "pnpm --filter @ai-video/api test",
+    "test:e2e": "pnpm --filter @ai-video/api test:e2e",
+    "test:unit": "pnpm --filter @ai-video/api test:unit",
+    "deploy:prod": "bash scripts/deploy.sh",
+    "update:prod": "bash scripts/update.sh",
+    "rollback:prod": "bash scripts/rollback.sh",
+    "backup:postgres": "bash scripts/backup-postgres.sh",
+    "clean": "turbo run clean && rm -rf node_modules"
+  },
+  "devDependencies": {
+    "prettier": "^3.4.2",
+    "turbo": "^2.3.3",
+    "typescript": "^5.7.2"
+  }
+}

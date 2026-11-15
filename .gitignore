@@ -1,0 +1,54 @@
+# Dependencies
+node_modules
+.pnpm-store
+
+# Build
+dist
+build
+.next
+.turbo
+*.tsbuildinfo
+
+# Environment
+.env
+.env.local
+.env.production
+.env.*.local
+!.env.example
+!.env.production.example
+
+# Ops artifacts
+backups/**
+!backups/.gitkeep
+releases/**
+!releases/.gitkeep
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+.DS_Store
+
+# Logs
+logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Testing
+coverage
+.nyc_output
+
+# Prisma
+apps/api/prisma/*.db
+apps/api/prisma/*.db-journal
+
+# Uploads / temp
+tmp
+temp
+uploads
+.cache
+
+# Docker volumes data (local)
+infrastructure/docker/data

@@ -1,0 +1,371 @@
+# Production compose — do not publish Postgres/Redis/MinIO to the host.
+# Only Caddy exposes 80/443. Volumes are never removed by deploy scripts.
+name: aivideo-prod
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: aivideo-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backups/postgres:/backups
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    networks:
+      - aivideo_internal
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  redis:
+    image: redis:7-alpine
+    container_name: aivideo-redis
+    restart: unless-stopped
+    command:
+      - redis-server
+      - /usr/local/etc/redis/redis.conf
+      - --requirepass
+      - ${REDIS_PASSWORD}
+      - --maxmemory
+      - ${REDIS_MAXMEMORY:-512mb}
+    volumes:
+      - redis_data:/data
+      - ./infrastructure/redis/redis.prod.conf:/usr/local/etc/redis/redis.conf:ro
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - aivideo_internal
+    deploy:
+      resources:
+        limits:
+          memory: 768M
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+  minio:
+    image: minio/minio:RELEASE.2024-12-18T13-15-44Z
+    container_name: aivideo-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY}
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    networks:
+      - aivideo_internal
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+  api:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/Dockerfile.api
+    image: aivideo-api:${APP_VERSION:-latest}
+    container_name: aivideo-api
+    restart: unless-stopped
+    stop_grace_period: 30s
+    env_file:
+      - ${ENV_FILE:-.env.production}
+    environment:
+      NODE_ENV: production
+      PROCESS_ROLE: api
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=public&connection_limit=20
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      MINIO_ENDPOINT: http://minio:9000
+      TRUST_PROXY: "true"
+      SWAGGER_ENABLED: ${SWAGGER_ENABLED:-false}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:3000/api/health/live"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 45s
+    networks:
+      - aivideo_internal
+    deploy:
+      resources:
+        limits:
+          memory: ${API_MEMORY_LIMIT:-768M}
+          cpus: "${API_CPU_LIMIT:-1.0}"
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "7"
+
+  # Singleton: Nest crons + automation/analytics BullMQ hosts. Do not scale replicas.
+  api-scheduler:
+    image: aivideo-api:${APP_VERSION:-latest}
+    container_name: aivideo-api-scheduler
+    restart: unless-stopped
+    stop_grace_period: 60s
+    env_file:
+      - ${ENV_FILE:-.env.production}
+    environment:
+      NODE_ENV: production
+      PROCESS_ROLE: scheduler
+      PORT: 3001
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=public&connection_limit=10
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      MINIO_ENDPOINT: http://minio:9000
+      TRUST_PROXY: "true"
+      SWAGGER_ENABLED: "false"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f 'node' >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 45s
+    networks:
+      - aivideo_internal
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          memory: ${SCHEDULER_MEMORY_LIMIT:-512M}
+          cpus: "${SCHEDULER_CPU_LIMIT:-0.5}"
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+  worker:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/Dockerfile.worker
+    image: aivideo-worker:${APP_VERSION:-latest}
+    container_name: aivideo-worker
+    restart: unless-stopped
+    stop_grace_period: 120s
+    env_file:
+      - ${ENV_FILE:-.env.production}
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=public&connection_limit=10
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      MINIO_ENDPOINT: http://minio:9000
+      WORKER_HEALTH_PORT: 3101
+    volumes:
+      - worker_tmp:/tmp
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:3101/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 45s
+    networks:
+      - aivideo_internal
+    deploy:
+      resources:
+        limits:
+          memory: ${WORKER_MEMORY_LIMIT:-2G}
+          cpus: "${WORKER_CPU_LIMIT:-2.0}"
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "7"
+
+  web:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/Dockerfile.web
+      args:
+        VITE_API_URL: ${VITE_API_URL:-/api}
+    image: aivideo-web:${APP_VERSION:-latest}
+    container_name: aivideo-web
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks:
+      - aivideo_internal
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  caddy:
+    image: caddy:2.8-alpine
+    container_name: aivideo-caddy
+    restart: unless-stopped
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+    environment:
+      DOMAIN: ${DOMAIN}
+    volumes:
+      - ./infrastructure/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      api:
+        condition: service_healthy
+      web:
+        condition: service_healthy
+    networks:
+      - aivideo_internal
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+  backup:
+    image: postgres:16-alpine
+    container_name: aivideo-backup
+    restart: unless-stopped
+    profiles: ["ops"]
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-14}
+      BACKUP_ENCRYPT_PASSPHRASE: ${BACKUP_ENCRYPT_PASSPHRASE:-}
+    volumes:
+      - ./backups/postgres:/backups
+      - ./scripts/backup-postgres.sh:/backup-postgres.sh:ro
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        apk add --no-cache openssl >/dev/null
+        while true; do
+          /bin/sh /backup-postgres.sh || true
+          sleep $${BACKUP_INTERVAL_SECONDS:-86400}
+        done
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - aivideo_internal
+
+  # External monitor — independent of Nest process internals (ops profile).
+  monitor:
+    image: curlimages/curl:8.5.0
+    container_name: aivideo-monitor
+    restart: unless-stopped
+    profiles: ["ops"]
+    environment:
+      MONITOR_LOOP: "1"
+      MONITOR_INTERVAL_SECONDS: ${MONITOR_INTERVAL_SECONDS:-60}
+      MONITOR_API_URL: http://api:3000/api/health/ready
+      MONITOR_WORKER_URL: http://worker:3101/health/ready
+      POSTGRES_USER: ${POSTGRES_USER}
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+    volumes:
+      - ./infrastructure/monitor/monitor.sh:/monitor.sh:ro
+      - ./backups/monitor:/out
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        MONITOR_OUT_DIR=/out
+        while true; do
+          # Lightweight in-network probes (docker.sock optional)
+          api_code=$$(curl -fsS -o /dev/null -w "%{http_code}" --max-time 5 "$$MONITOR_API_URL" || echo 000)
+          worker_code=$$(curl -fsS -o /dev/null -w "%{http_code}" --max-time 5 "$$MONITOR_WORKER_URL" || echo 000)
+          ts=$$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          echo "{\"ts\":\"$$ts\",\"api\":$$api_code,\"worker\":$$worker_code}" > /out/last_status.json
+          if [ "$$api_code" != "200" ] || [ "$$worker_code" != "200" ]; then
+            cp /out/last_status.json /out/last_alert.json
+            echo "[monitor] ALERT api=$$api_code worker=$$worker_code"
+          fi
+          sleep $$MONITOR_INTERVAL_SECONDS
+        done
+    depends_on:
+      api:
+        condition: service_healthy
+      worker:
+        condition: service_healthy
+    networks:
+      - aivideo_internal
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:
+  caddy_data:
+  caddy_config:
+  worker_tmp:
+
+networks:
+  aivideo_internal:
+    driver: bridge
+    internal: false

@@ -1,0 +1,54 @@
+export function statusTone(status: string): 'default' | 'success' | 'warning' | 'danger' | 'info' {
+  switch (status) {
+    case 'READY':
+    case 'COMPLETED':
+    case 'PUBLISHED':
+    case 'ENABLED':
+    case 'RUNNING':
+      return 'success';
+    case 'FAILED':
+    case 'CANCELLED':
+    case 'EMERGENCY_STOP':
+    case 'BLOCKED':
+    case 'BUDGET_BLOCKED':
+    case 'INELIGIBLE':
+    case 'STALLED':
+      return 'danger';
+    case 'PAUSED':
+    case 'WAITING':
+      return 'warning';
+    case 'SCHEDULED':
+    case 'PLANNED':
+      return 'info';
+    case 'DISABLED':
+    case 'SKIPPED':
+      return 'default';
+    case 'PROCESSING':
+    case 'RENDERING':
+    case 'QUEUED':
+    case 'GENERATING':
+    case 'ANALYZING':
+    case 'PLANNING':
+    case 'PREPARING_ASSETS':
+    case 'RENDERING_SCENES':
+    case 'MIXING_AUDIO':
+    case 'GENERATING_SUBTITLES':
+    case 'COMBINING':
+    case 'VALIDATING':
+    case 'UPLOADING':
+    case 'PUBLISHING':
+      return 'info';
+    case 'PENDING':
+    case 'DRAFT':
+    case 'ACTION_REQUIRED':
+    case 'TEST_ONLY':
+    case 'EXPIRED':
+    case 'MISSING_PERMISSIONS':
+      return 'warning';
+    case 'PUBLIC_READY':
+    case 'CONNECTED':
+      return 'success';
+    default:
+      return 'default';
+  }
+}

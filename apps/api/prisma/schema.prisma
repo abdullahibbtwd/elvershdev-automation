@@ -1,0 +1,1647 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  ADMIN
+  EDITOR
+  VIEWER
+}
+
+enum StoryStatus {
+  DRAFT
+  GENERATING
+  READY
+  FAILED
+  ARCHIVED
+}
+
+enum ProjectStatus {
+  DRAFT
+  PROCESSING
+  RENDERING
+  READY
+  FAILED
+  PUBLISHED
+}
+
+enum MediaType {
+  IMAGE
+  VIDEO
+  AUDIO
+  SUBTITLE
+  OTHER
+}
+
+enum SocialPlatform {
+  FACEBOOK
+  INSTAGRAM
+  TIKTOK
+  YOUTUBE
+}
+
+enum GenerationJobType {
+  STORY
+  SCENE_PLANNING
+  VISUAL_ANALYSIS
+  CHARACTER_REFERENCE
+  IMAGE
+  MOTION_ANALYSIS
+  VIDEO
+  NARRATION_PLANNING
+  VOICE
+  RENDER
+  PUBLISH
+  ANALYTICS
+}
+
+enum NarrationScriptStatus {
+  DRAFT
+  PLANNING
+  READY
+  APPROVED
+  FAILED
+}
+
+enum SceneNarrationStatus {
+  DRAFT
+  READY
+  APPROVED
+  FAILED
+}
+
+enum AudioGenerationStatus {
+  PENDING
+  GENERATING
+  VALIDATING
+  STORING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum VisualGenerationStatus {
+  PENDING
+  ANALYZING
+  PROMPT_READY
+  GENERATING
+  COMPLETED
+  FAILED
+}
+
+enum MotionGenerationStatus {
+  PENDING
+  ANALYZING
+  SUBMITTING
+  PROCESSING
+  DOWNLOADING
+  VALIDATING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum VideoRenderStatus {
+  PENDING
+  PLANNING
+  PREPARING_ASSETS
+  RENDERING_SCENES
+  MIXING_AUDIO
+  GENERATING_SUBTITLES
+  COMBINING
+  VALIDATING
+  UPLOADING
+  COMPLETED
+  FAILED
+  CANCELLED
+  INTERRUPTED
+}
+
+enum VideoRenderSceneStatus {
+  PENDING
+  READY
+  RENDERING
+  COMPLETED
+  FAILED
+  SKIPPED
+}
+
+enum JobStatus {
+  PENDING
+  QUEUED
+  PROCESSING
+  COMPLETED
+  FAILED
+  CANCELLED
+  INTERRUPTED
+}
+
+enum PublishStatus {
+  DRAFT
+  QUEUED
+  VALIDATING
+  UPLOADING
+  PROCESSING
+  PUBLISHING
+  PUBLISHED
+  FAILED
+  CANCELLED
+  ACTION_REQUIRED
+  SCHEDULED
+  INTERRUPTED
+}
+
+enum SocialConnectionStatus {
+  CONNECTED
+  MISSING_PERMISSIONS
+  NOT_ELIGIBLE
+  TEST_ONLY
+  PUBLIC_READY
+  EXPIRED
+  REVOKED
+  ERROR
+  DISCONNECTED
+}
+
+enum StoryGenerationType {
+  STORY
+  SCENES
+  REGENERATE
+}
+
+enum AutomationRunMode {
+  ENABLED
+  PAUSED
+  EMERGENCY_STOP
+}
+
+enum ContentPlanStatus {
+  DRAFT
+  APPROVED
+  GENERATING
+  GENERATED
+  FAILED
+  CANCELLED
+  SKIPPED
+}
+
+enum ContentScheduleStatus {
+  PLANNED
+  QUEUED
+  GENERATING
+  RENDERING
+  READY
+  SCHEDULING_PUBLISH
+  PUBLISHING
+  COMPLETED
+  FAILED
+  PAUSED
+  CANCELLED
+  BUDGET_BLOCKED
+  SKIPPED
+}
+
+enum AutomationStage {
+  PLANNING
+  STORY_GENERATION
+  SCENE_PLANNING
+  VISUAL_INTELLIGENCE
+  MOTION_GENERATION
+  NARRATION
+  SPEECH
+  RENDER
+  PUBLISH_SCHEDULE
+  DONE
+}
+
+enum AutomationExecutionStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+  CANCELLED
+  PAUSED
+  BUDGET_BLOCKED
+  STALLED
+}
+
+enum ScheduledPublicationStatus {
+  PENDING
+  SCHEDULED
+  QUEUED
+  PUBLISHING
+  PUBLISHED
+  FAILED
+  CANCELLED
+  SKIPPED
+  BUDGET_BLOCKED
+  INELIGIBLE
+}
+
+enum MetricAvailabilityStatus {
+  AVAILABLE
+  UNAVAILABLE
+  NOT_SYNCED
+  SYNC_FAILED
+  ESTIMATED
+}
+
+enum AnalyticsMetricSource {
+  PROVIDER_API
+  MOCK
+  ESTIMATED
+  DERIVED
+  UNAVAILABLE
+}
+
+enum AnalyticsSyncJobStatus {
+  PENDING
+  QUEUED
+  RUNNING
+  COMPLETED
+  PARTIAL
+  FAILED
+  CANCELLED
+}
+
+enum AnalyticsSyncJobType {
+  FULL
+  MANUAL
+  INITIAL_POST
+  POST_REFRESH
+  ACCOUNT_REFRESH
+  AGGREGATION
+  INSIGHTS
+}
+
+enum AnalyticsInsightConfidence {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum ContentPerformanceStatus {
+  UNKNOWN
+  UNDERPERFORMING
+  AVERAGE
+  STRONG
+  TOP
+}
+
+model User {
+  id           String   @id @default(uuid())
+  name         String
+  email        String   @unique
+  passwordHash String   @map("password_hash")
+  role         UserRole @default(EDITOR)
+  isActive     Boolean  @default(true) @map("is_active")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  refreshSessions        RefreshSession[]
+  socialChannels         SocialChannel[]
+  stories                Story[]
+  videoProjects          VideoProject[]
+  mediaAssets            MediaAsset[]
+  generationJobs         GenerationJob[]
+  publishRecords         PublishRecord[]
+  storyGenerations       StoryGeneration[]
+  providerUsages         ProviderUsage[]
+  visualStyles           VisualStyle[]
+  motionGenerations      MotionGeneration[]
+  narrationScripts       NarrationScript[]
+  voiceProfiles          VoiceProfile[]
+  audioGenerations       AudioGeneration[]
+  videoRenders           VideoRender[]
+  oauthStates            OAuthState[]
+  automationConfig       AutomationConfig?
+  contentPlans           ContentPlan[]
+  contentSchedules       ContentSchedule[]
+  scheduledPublications  ScheduledPublication[]
+  automationExecutions   AutomationExecution[]
+  notifications               Notification[]
+  automationAuditLogs         AutomationAuditLog[]
+  videoAnalytics              VideoAnalytics[]
+  platformPostAnalytics       PlatformPostAnalytics[]
+  analyticsSnapshots          AnalyticsSnapshot[]
+  contentPerformanceSummaries ContentPerformanceSummary[]
+  costBreakdowns              CostBreakdown[]
+  analyticsSyncJobs           AnalyticsSyncJob[]
+  analyticsInsights           AnalyticsInsight[]
+  analyticsOptimizationSettings AnalyticsOptimizationSettings?
+
+  @@index([email])
+  @@map("users")
+}
+
+model RefreshSession {
+  id        String    @id @default(uuid())
+  userId    String    @map("user_id")
+  tokenHash String    @unique @map("token_hash")
+  expiresAt DateTime  @map("expires_at")
+  revokedAt DateTime? @map("revoked_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("refresh_sessions")
+}
+
+model SocialChannel {
+  id                    String                 @id @default(uuid())
+  userId                String                 @map("user_id")
+  platform              SocialPlatform
+  accountName           String                 @map("account_name")
+  username              String?
+  platformAccountId     String                 @map("platform_account_id")
+  profileImageUrl       String?                @map("profile_image_url")
+  accountType           String?                @map("account_type")
+  connectionStatus      SocialConnectionStatus @default(CONNECTED) @map("connection_status")
+  grantedScopes         String[]               @default([]) @map("granted_scopes")
+  publishingCapabilities Json                  @default("{}") @map("publishing_capabilities")
+  accessTokenEncrypted  String                 @map("access_token_encrypted")
+  refreshTokenEncrypted String?                @map("refresh_token_encrypted")
+  tokenExpiresAt        DateTime?              @map("token_expires_at")
+  lastConnectionCheckAt DateTime?              @map("last_connection_check_at")
+  lastError             String?                @map("last_error")
+  metadata              Json                   @default("{}")
+  isActive              Boolean                @default(true) @map("is_active")
+  createdAt             DateTime               @default(now()) @map("created_at")
+  updatedAt             DateTime               @updatedAt @map("updated_at")
+
+  user                  User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  publishRecords        PublishRecord[]
+  platformPostAnalytics PlatformPostAnalytics[]
+
+  @@unique([userId, platform, platformAccountId])
+  @@index([userId])
+  @@index([platform])
+  @@index([connectionStatus])
+  @@map("social_channels")
+}
+
+model OAuthState {
+  id           String         @id @default(uuid())
+  state        String         @unique
+  userId       String         @map("user_id")
+  provider     SocialPlatform
+  codeVerifier String?        @map("code_verifier")
+  redirectPath String?        @map("redirect_path")
+  metadata     Json           @default("{}")
+  expiresAt    DateTime       @map("expires_at")
+  createdAt    DateTime       @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("oauth_states")
+}
+
+model Story {
+  id                     String      @id @default(uuid())
+  userId                 String      @map("user_id")
+  title                  String
+  content                String      @db.Text
+  status                 StoryStatus @default(DRAFT)
+  topic                  String?
+  niche                  String?
+  targetAudience         String?     @map("target_audience")
+  language               String      @default("en")
+  tone                   String?
+  category               String?
+  targetDurationSeconds  Int?        @map("target_duration_seconds")
+  openingHook            String?     @map("opening_hook") @db.Text
+  narrationScript        String?     @map("narration_script") @db.Text
+  closingMessage         String?     @map("closing_message") @db.Text
+  description            String?     @db.Text
+  hashtags               String[]    @default([])
+  visualStyleId          String?     @map("visual_style_id")
+  createdAt              DateTime    @default(now()) @map("created_at")
+  updatedAt              DateTime    @updatedAt @map("updated_at")
+
+  user             User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  visualStyle      VisualStyle?      @relation(fields: [visualStyleId], references: [id], onDelete: SetNull)
+  videoProjects    VideoProject[]
+  generations      StoryGeneration[]
+  scenes           StoryScene[]
+  characters       CharacterProfile[]
+  generationJobs    GenerationJob[]
+  providerUsages    ProviderUsage[]
+  motionGenerations MotionGeneration[]
+  narrationScripts  NarrationScript[]
+  audioGenerations  AudioGeneration[]
+  videoRenders      VideoRender[]
+
+  @@index([userId])
+  @@index([status])
+  @@index([visualStyleId])
+  @@map("stories")
+}
+
+model StoryGeneration {
+  id              String              @id @default(uuid())
+  userId          String              @map("user_id")
+  storyId         String              @map("story_id")
+  generationJobId String?             @unique @map("generation_job_id")
+  requestType     StoryGenerationType @map("request_type")
+  status          JobStatus           @default(PENDING)
+  promptParams    Json                @map("prompt_params")
+  model           String?
+  inputTokens     Int?                @map("input_tokens")
+  outputTokens    Int?                @map("output_tokens")
+  estimatedCost   Decimal?            @map("estimated_cost") @db.Decimal(12, 6)
+  errorMessage    String?             @map("error_message")
+  result          Json?
+  createdAt       DateTime            @default(now()) @map("created_at")
+  updatedAt       DateTime            @updatedAt @map("updated_at")
+
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  story         Story          @relation(fields: [storyId], references: [id], onDelete: Cascade)
+  generationJob GenerationJob? @relation(fields: [generationJobId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([storyId])
+  @@index([status])
+  @@map("story_generations")
+}
+
+model StoryScene {
+  id                               String   @id @default(uuid())
+  storyId                          String   @map("story_id")
+  sceneNumber                      Int      @map("scene_number")
+  durationSeconds                  Float    @map("duration_seconds")
+  narration                        String   @db.Text
+  visualDescription                String   @map("visual_description") @db.Text
+  imagePrompt                      String   @map("image_prompt") @db.Text
+  videoPrompt                      String   @map("video_prompt") @db.Text
+  cameraMovement                   String   @map("camera_movement")
+  lighting                         String
+  environment                      String   @db.Text
+  characterConsistencyInstructions String   @map("character_consistency_instructions") @db.Text
+  createdAt                        DateTime @default(now()) @map("created_at")
+  updatedAt                        DateTime @updatedAt @map("updated_at")
+
+  story             Story              @relation(fields: [storyId], references: [id], onDelete: Cascade)
+  visuals           SceneVisual[]
+  motionGenerations MotionGeneration[]
+  sceneNarrations   SceneNarration[]
+  audioGenerations  AudioGeneration[]
+  videoRenderScenes VideoRenderScene[]
+
+  @@unique([storyId, sceneNumber])
+  @@index([storyId])
+  @@map("story_scenes")
+}
+
+model CharacterProfile {
+  id                             String   @id @default(uuid())
+  storyId                        String   @map("story_id")
+  name                           String
+  appearance                     String   @db.Text
+  clothing                       String   @db.Text
+  ageRange                       String   @map("age_range")
+  hair                           String
+  distinctiveFeatures            String   @map("distinctive_features") @db.Text
+  consistencyNotes               String   @map("consistency_notes") @db.Text
+  genderPresentation             String?  @map("gender_presentation")
+  skinTone                       String?  @map("skin_tone")
+  facialFeatures                 String?  @map("facial_features") @db.Text
+  hairstyle                      String?
+  hairColor                      String?  @map("hair_color")
+  bodyBuild                      String?  @map("body_build")
+  accessories                    String?  @db.Text
+  canonicalVisualDescription     String?  @map("canonical_visual_description") @db.Text
+  visualConsistencyInstructions  String?  @map("visual_consistency_instructions") @db.Text
+  createdAt                      DateTime @default(now()) @map("created_at")
+  updatedAt                      DateTime @updatedAt @map("updated_at")
+
+  story             Story                      @relation(fields: [storyId], references: [id], onDelete: Cascade)
+  visualReferences  CharacterVisualReference[]
+
+  @@unique([storyId, name])
+  @@index([storyId])
+  @@map("character_profiles")
+}
+
+model VisualStyle {
+  id            String   @id @default(uuid())
+  userId        String?  @map("user_id")
+  name          String
+  description   String   @db.Text
+  configuration Json
+  isDefault     Boolean  @default(false) @map("is_default")
+  isSystem      Boolean  @default(false) @map("is_system")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  user         User?         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  stories      Story[]
+  sceneVisuals SceneVisual[]
+
+  @@unique([userId, name])
+  @@index([userId])
+  @@index([isDefault])
+  @@map("visual_styles")
+}
+
+model SceneVisual {
+  id                     String                 @id @default(uuid())
+  sceneId                String                 @map("scene_id")
+  visualStyleId          String?                @map("visual_style_id")
+  visualPrompt           String                 @map("visual_prompt") @db.Text
+  negativePrompt         String?                @map("negative_prompt") @db.Text
+  structuredBrief        Json?                  @map("structured_brief")
+  generationStatus       VisualGenerationStatus @default(PENDING) @map("generation_status")
+  generatedImageMediaId  String?                @unique @map("generated_image_media_id")
+  isSelected             Boolean                @default(false) @map("is_selected")
+  attemptNumber          Int                    @default(1) @map("attempt_number")
+  provider               String?
+  providerModel          String?                @map("provider_model")
+  generationParameters   Json?                  @map("generation_parameters")
+  generationJobId        String?                @map("generation_job_id")
+  seed                   Int?
+  errorMessage           String?                @map("error_message")
+  createdAt              DateTime               @default(now()) @map("created_at")
+  updatedAt              DateTime               @updatedAt @map("updated_at")
+
+  scene               StoryScene         @relation(fields: [sceneId], references: [id], onDelete: Cascade)
+  visualStyle         VisualStyle?       @relation(fields: [visualStyleId], references: [id], onDelete: SetNull)
+  generatedImageMedia MediaAsset?        @relation("SceneVisualImage", fields: [generatedImageMediaId], references: [id], onDelete: SetNull)
+  generationJob       GenerationJob?     @relation(fields: [generationJobId], references: [id], onDelete: SetNull)
+  motionGenerations   MotionGeneration[]
+
+  @@index([sceneId])
+  @@index([generationStatus])
+  @@index([generationJobId])
+  @@index([sceneId, isSelected])
+  @@map("scene_visuals")
+}
+
+model MotionGeneration {
+  id                   String                 @id @default(uuid())
+  userId               String                 @map("user_id")
+  storyId              String                 @map("story_id")
+  sceneId              String                 @map("scene_id")
+  sourceVisualId       String                 @map("source_visual_id")
+  sourceMediaAssetId   String                 @map("source_media_asset_id")
+  provider             String                 @default("kling")
+  providerModel        String?                @map("provider_model")
+  providerTaskId       String?                @map("provider_task_id")
+  motionPrompt         String                 @map("motion_prompt") @db.Text
+  negativePrompt       String?                @map("negative_prompt") @db.Text
+  structuredBrief      Json?                  @map("structured_brief")
+  generationParameters Json?                  @map("generation_parameters")
+  status               MotionGenerationStatus @default(PENDING)
+  progress             Int                    @default(0)
+  outputMediaAssetId   String?                @unique @map("output_media_asset_id")
+  durationSeconds      Int                    @default(5) @map("duration_seconds")
+  resolution           String                 @default("720p")
+  estimatedCost        Decimal?               @map("estimated_cost") @db.Decimal(12, 6)
+  actualCost           Decimal?               @map("actual_cost") @db.Decimal(12, 6)
+  currency             String                 @default("USD")
+  isSelected           Boolean                @default(false) @map("is_selected")
+  attemptNumber        Int                    @default(1) @map("attempt_number")
+  generationJobId      String?                @map("generation_job_id")
+  pollAttempt          Int                    @default(0) @map("poll_attempt")
+  errorCode            String?                @map("error_code")
+  errorMessage         String?                @map("error_message")
+  submittedAt          DateTime?              @map("submitted_at")
+  completedAt          DateTime?              @map("completed_at")
+  createdAt            DateTime               @default(now()) @map("created_at")
+  updatedAt            DateTime               @updatedAt @map("updated_at")
+
+  user             User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  story            Story          @relation(fields: [storyId], references: [id], onDelete: Cascade)
+  scene            StoryScene     @relation(fields: [sceneId], references: [id], onDelete: Cascade)
+  sourceVisual     SceneVisual    @relation(fields: [sourceVisualId], references: [id], onDelete: Cascade)
+  sourceMediaAsset MediaAsset     @relation("MotionSourceMedia", fields: [sourceMediaAssetId], references: [id], onDelete: Restrict)
+  outputMediaAsset MediaAsset?    @relation("MotionOutputMedia", fields: [outputMediaAssetId], references: [id], onDelete: SetNull)
+  generationJob    GenerationJob? @relation(fields: [generationJobId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([storyId])
+  @@index([sceneId])
+  @@index([sourceVisualId])
+  @@index([status])
+  @@index([providerTaskId])
+  @@index([generationJobId])
+  @@index([sceneId, isSelected])
+  @@index([storyId, status])
+  @@map("motion_generations")
+}
+
+model CharacterVisualReference {
+  id                 String   @id @default(uuid())
+  characterProfileId String   @map("character_profile_id")
+  mediaAssetId       String   @map("media_asset_id")
+  prompt             String   @db.Text
+  isPrimary          Boolean  @default(false) @map("is_primary")
+  generationJobId    String?  @map("generation_job_id")
+  createdAt          DateTime @default(now()) @map("created_at")
+
+  characterProfile CharacterProfile @relation(fields: [characterProfileId], references: [id], onDelete: Cascade)
+  mediaAsset       MediaAsset       @relation(fields: [mediaAssetId], references: [id], onDelete: Cascade)
+  generationJob    GenerationJob?   @relation(fields: [generationJobId], references: [id], onDelete: SetNull)
+
+  @@index([characterProfileId])
+  @@index([mediaAssetId])
+  @@index([characterProfileId, isPrimary])
+  @@map("character_visual_references")
+}
+
+model ProviderUsage {
+  id              String   @id @default(uuid())
+  userId          String   @map("user_id")
+  storyId         String?  @map("story_id")
+  generationJobId String?  @map("generation_job_id")
+  provider        String
+  model           String
+  requestType     String   @map("request_type")
+  inputTokens     Int      @default(0) @map("input_tokens")
+  outputTokens    Int      @default(0) @map("output_tokens")
+  estimatedCost   Decimal  @default(0) @map("estimated_cost") @db.Decimal(12, 6)
+  metadata        Json?
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  story         Story?         @relation(fields: [storyId], references: [id], onDelete: SetNull)
+  generationJob GenerationJob? @relation(fields: [generationJobId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([storyId])
+  @@index([provider, model])
+  @@map("provider_usages")
+}
+
+model VideoProject {
+  id              String           @id @default(uuid())
+  userId          String           @map("user_id")
+  storyId         String?          @map("story_id")
+  title           String
+  description     String?          @db.Text
+  status          ProjectStatus    @default(DRAFT)
+  duration        Int?
+  aspectRatio     String?          @map("aspect_ratio")
+  targetPlatforms SocialPlatform[] @map("target_platforms")
+  createdAt       DateTime         @default(now()) @map("created_at")
+  updatedAt       DateTime         @updatedAt @map("updated_at")
+
+  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  story          Story?          @relation(fields: [storyId], references: [id], onDelete: SetNull)
+  mediaAssets    MediaAsset[]
+  generationJobs GenerationJob[]
+  publishRecords PublishRecord[]
+
+  @@index([userId])
+  @@index([storyId])
+  @@index([status])
+  @@map("video_projects")
+}
+
+model MediaAsset {
+  id             String    @id @default(uuid())
+  userId         String    @map("user_id")
+  videoProjectId String?   @map("video_project_id")
+  type           MediaType
+  storageKey     String    @map("storage_key")
+  originalName   String?   @map("original_name")
+  mimeType       String?   @map("mime_type")
+  fileSize       BigInt?   @map("file_size")
+  metadata       Json?
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  user                      User                       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  videoProject              VideoProject?              @relation(fields: [videoProjectId], references: [id], onDelete: SetNull)
+  sceneVisual               SceneVisual?               @relation("SceneVisualImage")
+  characterVisualReferences CharacterVisualReference[]
+  motionSourceFor           MotionGeneration[]         @relation("MotionSourceMedia")
+  motionOutputFor           MotionGeneration?          @relation("MotionOutputMedia")
+  audioGenerations          AudioGeneration[]          @relation("AudioMediaAsset")
+  videoRenderOutputs        VideoRender[]              @relation("VideoRenderOutput")
+  videoRenderSubtitles      VideoRender[]              @relation("VideoRenderSubtitle")
+  videoRenderMusic          VideoRender[]              @relation("VideoRenderMusic")
+
+  @@index([userId])
+  @@index([videoProjectId])
+  @@index([type])
+  @@map("media_assets")
+}
+
+model GenerationJob {
+  id             String            @id @default(uuid())
+  userId         String            @map("user_id")
+  videoProjectId String?           @map("video_project_id")
+  storyId        String?           @map("story_id")
+  jobType        GenerationJobType @map("job_type")
+  status         JobStatus         @default(PENDING)
+  progress       Int               @default(0)
+  provider       String?
+  queueName      String?           @map("queue_name")
+  queueJobId     String?           @map("queue_job_id")
+  attempts       Int               @default(0)
+  maxAttempts    Int               @default(3) @map("max_attempts")
+  estimatedCost  Decimal?          @map("estimated_cost") @db.Decimal(12, 4)
+  actualCost     Decimal?          @map("actual_cost") @db.Decimal(12, 4)
+  payload        Json?
+  result         Json?
+  errorMessage   String?           @map("error_message")
+  startedAt      DateTime?         @map("started_at")
+  completedAt    DateTime?         @map("completed_at")
+  createdAt      DateTime          @default(now()) @map("created_at")
+  updatedAt      DateTime          @updatedAt @map("updated_at")
+
+  user                      User                       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  videoProject              VideoProject?              @relation(fields: [videoProjectId], references: [id], onDelete: SetNull)
+  story                     Story?                     @relation(fields: [storyId], references: [id], onDelete: SetNull)
+  storyGeneration           StoryGeneration?
+  providerUsages            ProviderUsage[]
+  sceneVisuals              SceneVisual[]
+  characterVisualReferences CharacterVisualReference[]
+  motionGenerations         MotionGeneration[]
+  narrationScripts          NarrationScript[]
+  audioGenerations          AudioGeneration[]
+  videoRenders              VideoRender[]
+  publishRecords            PublishRecord[]
+
+  @@index([userId])
+  @@index([videoProjectId])
+  @@index([storyId])
+  @@index([jobType, status])
+  @@index([queueJobId])
+  @@map("generation_jobs")
+}
+
+model PublishRecord {
+  id                String         @id @default(uuid())
+  userId            String         @map("user_id")
+  videoProjectId    String?        @map("video_project_id")
+  videoRenderId     String?        @map("video_render_id")
+  channelId         String?        @map("channel_id")
+  platform          SocialPlatform
+  status            PublishStatus  @default(DRAFT)
+  caption           String?        @db.Text
+  description       String?        @db.Text
+  title             String?
+  hashtags          String[]       @default([])
+  platformSettings  Json           @default("{}") @map("platform_settings")
+  providerUploadId  String?        @map("provider_upload_id")
+  providerPublishId String?        @map("provider_publish_id")
+  providerPostId    String?        @map("provider_post_id")
+  externalPostId    String?        @map("external_post_id")
+  postUrl           String?        @map("post_url")
+  uploadProgress    Int            @default(0) @map("upload_progress")
+  errorCode         String?        @map("error_code")
+  errorMessage      String?        @map("error_message")
+  retryCount        Int            @default(0) @map("retry_count")
+  idempotencyKey    String?        @unique @map("idempotency_key")
+  generationJobId   String?        @map("generation_job_id")
+  scheduledAt       DateTime?      @map("scheduled_at")
+  submittedAt       DateTime?      @map("submitted_at")
+  publishedAt       DateTime?      @map("published_at")
+  createdAt         DateTime       @default(now()) @map("created_at")
+  updatedAt         DateTime       @updatedAt @map("updated_at")
+
+  user                  User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  videoProject          VideoProject?           @relation(fields: [videoProjectId], references: [id], onDelete: SetNull)
+  videoRender           VideoRender?            @relation(fields: [videoRenderId], references: [id], onDelete: SetNull)
+  channel               SocialChannel?          @relation(fields: [channelId], references: [id], onDelete: SetNull)
+  generationJob         GenerationJob?          @relation(fields: [generationJobId], references: [id], onDelete: SetNull)
+  scheduledPublication  ScheduledPublication?
+  platformPostAnalytics PlatformPostAnalytics?
+
+  @@index([userId])
+  @@index([videoProjectId])
+  @@index([videoRenderId])
+  @@index([channelId])
+  @@index([status])
+  @@index([generationJobId])
+  @@index([providerPublishId])
+  @@index([providerPostId])
+  @@index([scheduledAt])
+  @@map("publish_records")
+}
+
+model NarrationScript {
+  id        String                @id @default(uuid())
+  userId    String                @map("user_id")
+  storyId   String                @map("story_id")
+  version   Int                   @default(1)
+  status    NarrationScriptStatus @default(DRAFT)
+  fullText  String?               @map("full_text") @db.Text
+  notes     String?               @db.Text
+  generationJobId String?         @map("generation_job_id")
+  approvedAt DateTime?            @map("approved_at")
+  errorMessage String?            @map("error_message")
+  createdAt DateTime              @default(now()) @map("created_at")
+  updatedAt DateTime              @updatedAt @map("updated_at")
+
+  user            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  story           Story            @relation(fields: [storyId], references: [id], onDelete: Cascade)
+  generationJob   GenerationJob?   @relation(fields: [generationJobId], references: [id], onDelete: SetNull)
+  scenes          SceneNarration[]
+  audioGenerations AudioGeneration[]
+
+  @@unique([storyId, version])
+  @@index([userId])
+  @@index([storyId])
+  @@index([status])
+  @@index([generationJobId])
+  @@map("narration_scripts")
+}
+
+model SceneNarration {
+  id                     String               @id @default(uuid())
+  narrationScriptId      String               @map("narration_script_id")
+  storyId                String               @map("story_id")
+  sceneId                String               @map("scene_id")
+  sequence               Int
+  text                   String               @db.Text
+  emotionalTone          String               @map("emotional_tone")
+  speakingStyle          String               @map("speaking_style")
+  deliveryInstructions   String?              @map("delivery_instructions") @db.Text
+  pronunciationGuidance  String?              @map("pronunciation_guidance") @db.Text
+  estimatedDuration      Float                @map("estimated_duration")
+  status                 SceneNarrationStatus @default(DRAFT)
+  createdAt              DateTime             @default(now()) @map("created_at")
+  updatedAt              DateTime             @updatedAt @map("updated_at")
+
+  narrationScript  NarrationScript   @relation(fields: [narrationScriptId], references: [id], onDelete: Cascade)
+  scene            StoryScene        @relation(fields: [sceneId], references: [id], onDelete: Cascade)
+  audioGenerations AudioGeneration[]
+
+  @@unique([narrationScriptId, sceneId])
+  @@unique([narrationScriptId, sequence])
+  @@index([narrationScriptId])
+  @@index([storyId])
+  @@index([sceneId])
+  @@index([status])
+  @@map("scene_narrations")
+}
+
+model VoiceProfile {
+  id              String   @id @default(uuid())
+  userId          String   @map("user_id")
+  name            String
+  provider        String   @default("gemini")
+  providerVoiceId String   @map("provider_voice_id")
+  language        String   @default("en")
+  configuration   Json     @default("{}")
+  isDefault       Boolean  @default(false) @map("is_default")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  user             User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  audioGenerations AudioGeneration[]
+
+  @@unique([userId, name])
+  @@index([userId])
+  @@index([userId, isDefault])
+  @@index([provider, providerVoiceId])
+  @@map("voice_profiles")
+}
+
+model AudioGeneration {
+  id                  String                @id @default(uuid())
+  userId              String                @map("user_id")
+  storyId             String                @map("story_id")
+  sceneId             String?               @map("scene_id")
+  narrationScriptId   String                @map("narration_script_id")
+  sceneNarrationId    String?               @map("scene_narration_id")
+  voiceProfileId      String?               @map("voice_profile_id")
+  provider            String                @default("gemini")
+  model               String?
+  status              AudioGenerationStatus @default(PENDING)
+  progress            Int                   @default(0)
+  sourceText          String                @map("source_text") @db.Text
+  speakingStyle       String?               @map("speaking_style")
+  providerVoiceId     String?               @map("provider_voice_id")
+  audioMediaAssetId   String?               @unique @map("audio_media_asset_id")
+  duration            Float?
+  format              String?
+  sampleRate          Int?                  @map("sample_rate")
+  channels            Int?
+  fileSize            BigInt?               @map("file_size")
+  estimatedCost       Decimal?              @map("estimated_cost") @db.Decimal(12, 6)
+  actualCost          Decimal?              @map("actual_cost") @db.Decimal(12, 6)
+  currency            String                @default("USD")
+  isSelected          Boolean               @default(false) @map("is_selected")
+  attemptNumber       Int                   @default(1) @map("attempt_number")
+  retryCount          Int                   @default(0) @map("retry_count")
+  idempotencyKey      String?               @unique @map("idempotency_key")
+  generationJobId     String?               @map("generation_job_id")
+  errorCode           String?               @map("error_code")
+  errorMessage        String?               @map("error_message")
+  startedAt           DateTime?             @map("started_at")
+  completedAt         DateTime?             @map("completed_at")
+  createdAt           DateTime              @default(now()) @map("created_at")
+  updatedAt           DateTime              @updatedAt @map("updated_at")
+
+  user             User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  story            Story            @relation(fields: [storyId], references: [id], onDelete: Cascade)
+  scene            StoryScene?      @relation(fields: [sceneId], references: [id], onDelete: Cascade)
+  narrationScript  NarrationScript  @relation(fields: [narrationScriptId], references: [id], onDelete: Cascade)
+  sceneNarration   SceneNarration?  @relation(fields: [sceneNarrationId], references: [id], onDelete: SetNull)
+  voiceProfile     VoiceProfile?    @relation(fields: [voiceProfileId], references: [id], onDelete: SetNull)
+  audioMediaAsset  MediaAsset?      @relation("AudioMediaAsset", fields: [audioMediaAssetId], references: [id], onDelete: SetNull)
+  generationJob    GenerationJob?   @relation(fields: [generationJobId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([storyId])
+  @@index([sceneId])
+  @@index([narrationScriptId])
+  @@index([sceneNarrationId])
+  @@index([voiceProfileId])
+  @@index([status])
+  @@index([generationJobId])
+  @@index([sceneId, isSelected])
+  @@index([storyId, status])
+  @@map("audio_generations")
+}
+
+model VideoRender {
+  id                      String           @id @default(uuid())
+  userId                  String           @map("user_id")
+  storyId                 String           @map("story_id")
+  status                  VideoRenderStatus @default(PENDING)
+  renderType              String           @default("final") @map("render_type")
+  aspectRatio             String           @default("9:16") @map("aspect_ratio")
+  width                   Int              @default(1080)
+  height                  Int              @default(1920)
+  frameRate               Int              @default(30) @map("frame_rate")
+  videoCodec              String           @default("libx264") @map("video_codec")
+  audioCodec              String           @default("aac") @map("audio_codec")
+  qualityPreset           String           @default("medium") @map("quality_preset")
+  subtitleEnabled         Boolean          @default(true) @map("subtitle_enabled")
+  subtitleBurnedIn        Boolean          @default(true) @map("subtitle_burned_in")
+  backgroundMusicAssetId  String?          @map("background_music_asset_id")
+  renderSettings          Json             @default("{}") @map("render_settings")
+  timeline                Json?
+  outputMediaAssetId      String?          @unique @map("output_media_asset_id")
+  subtitleMediaAssetId    String?          @unique @map("subtitle_media_asset_id")
+  duration                Float?
+  fileSize                BigInt?          @map("file_size")
+  processingTimeMs        Int?             @map("processing_time_ms")
+  retryCount              Int              @default(0) @map("retry_count")
+  currentSceneSequence    Int?             @map("current_scene_sequence")
+  completedSceneCount     Int              @default(0) @map("completed_scene_count")
+  totalSceneCount         Int              @default(0) @map("total_scene_count")
+  errorCode               String?          @map("error_code")
+  errorMessage            String?          @map("error_message")
+  progress                Int              @default(0)
+  generationJobId         String?          @map("generation_job_id")
+  startedAt               DateTime?        @map("started_at")
+  completedAt             DateTime?        @map("completed_at")
+  createdAt               DateTime         @default(now()) @map("created_at")
+  updatedAt               DateTime         @updatedAt @map("updated_at")
+
+  user                 User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  story                Story            @relation(fields: [storyId], references: [id], onDelete: Cascade)
+  backgroundMusicAsset MediaAsset?      @relation("VideoRenderMusic", fields: [backgroundMusicAssetId], references: [id], onDelete: SetNull)
+  outputMediaAsset     MediaAsset?      @relation("VideoRenderOutput", fields: [outputMediaAssetId], references: [id], onDelete: SetNull)
+  subtitleMediaAsset   MediaAsset?      @relation("VideoRenderSubtitle", fields: [subtitleMediaAssetId], references: [id], onDelete: SetNull)
+  generationJob        GenerationJob?   @relation(fields: [generationJobId], references: [id], onDelete: SetNull)
+  scenes               VideoRenderScene[]
+  publishRecords       PublishRecord[]
+  videoAnalytics       VideoAnalytics?
+
+  @@index([userId])
+  @@index([storyId])
+  @@index([status])
+  @@index([generationJobId])
+  @@index([storyId, status])
+  @@map("video_renders")
+}
+
+model VideoRenderScene {
+  id                         String                 @id @default(uuid())
+  videoRenderId              String                 @map("video_render_id")
+  sceneId                    String                 @map("scene_id")
+  sequence                   Int
+  startTime                  Float                  @map("start_time")
+  endTime                    Float                  @map("end_time")
+  duration                   Float
+  selectedMotionGenerationId String?                @map("selected_motion_generation_id")
+  selectedVisualId           String?                @map("selected_visual_id")
+  selectedAudioGenerationId  String?                @map("selected_audio_generation_id")
+  transitionIn               String                 @default("fade") @map("transition_in")
+  transitionOut              String                 @default("fade") @map("transition_out")
+  status                     VideoRenderSceneStatus @default(PENDING)
+  segmentStorageKey          String?                @map("segment_storage_key")
+  errorMessage               String?                @map("error_message")
+  createdAt                  DateTime               @default(now()) @map("created_at")
+  updatedAt                  DateTime               @updatedAt @map("updated_at")
+
+  videoRender VideoRender @relation(fields: [videoRenderId], references: [id], onDelete: Cascade)
+  scene       StoryScene  @relation(fields: [sceneId], references: [id], onDelete: Cascade)
+
+  @@unique([videoRenderId, sceneId])
+  @@unique([videoRenderId, sequence])
+  @@index([videoRenderId])
+  @@index([sceneId])
+  @@index([status])
+  @@map("video_render_scenes")
+}
+
+model Setting {
+  id        String   @id @default(uuid())
+  key       String   @unique
+  value     Json
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("settings")
+}
+
+model AutomationConfig {
+  id                          String            @id @default(uuid())
+  userId                      String            @unique @map("user_id")
+  enabled                     Boolean           @default(false)
+  runMode                     AutomationRunMode @default(PAUSED) @map("run_mode")
+  dailyGenerationTarget       Int               @default(2) @map("daily_generation_target")
+  monthlyGenerationTarget     Int               @default(60) @map("monthly_generation_target")
+  timezone                    String            @default("UTC")
+  preferredPublishingDays     Int[]             @default([1, 2, 3, 4, 5]) @map("preferred_publishing_days")
+  includeWeekends             Boolean           @default(true) @map("include_weekends")
+  publishingWindowStart       String            @default("09:00") @map("publishing_window_start")
+  publishingWindowEnd         String            @default("21:00") @map("publishing_window_end")
+  platformPublishingTimes     Json              @default("{}") @map("platform_publishing_times")
+  minIntervalMinutes          Int               @default(60) @map("min_interval_minutes")
+  maxDailyPublishingAttempts  Int               @default(20) @map("max_daily_publishing_attempts")
+  channelPublishingEnabled    Json              @default("{\"FACEBOOK\":true,\"INSTAGRAM\":true,\"TIKTOK\":true,\"YOUTUBE\":true}") @map("channel_publishing_enabled")
+  activeChannelIds            String[]          @default([]) @map("active_channel_ids")
+  contentCategories           String[]          @default(["Narrative", "Motivation"]) @map("content_categories")
+  storyGenres                 String[]          @default(["Cinematic storytelling"]) @map("story_genres")
+  themes                      String[]          @default([]) 
+  targetAudience              String?           @map("target_audience")
+  language                    String            @default("en")
+  tone                        String?           
+  targetDurationSeconds       Int               @default(60) @map("target_duration_seconds")
+  visualStyleId               String?           @map("visual_style_id")
+  narrationVoiceId            String?           @map("narration_voice_id")
+  contentExclusions           String[]          @default([]) @map("content_exclusions")
+  brandIdentity               String?           @map("brand_identity") @db.Text
+  maxConcurrentGeneration     Int               @default(2) @map("max_concurrent_generation")
+  maxConcurrentPublishing     Int               @default(4) @map("max_concurrent_publishing")
+  maxRetries                  Int               @default(3) @map("max_retries")
+  dailyBudgetUsd              Decimal?          @map("daily_budget_usd") @db.Decimal(12, 4)
+  monthlyBudgetUsd            Decimal?          @map("monthly_budget_usd") @db.Decimal(12, 4)
+  maxCostPerVideoUsd          Decimal?          @map("max_cost_per_video_usd") @db.Decimal(12, 4)
+  maxGenerationAttempts       Int               @default(3) @map("max_generation_attempts")
+  maxImageGenerationsPerScene Int               @default(3) @map("max_image_generations_per_scene")
+  maxMotionAttemptsPerScene   Int               @default(3) @map("max_motion_attempts_per_scene")
+  emergencyStopAt             DateTime?         @map("emergency_stop_at")
+  pausedAt                    DateTime?         @map("paused_at")
+  lastDailyPlanDate           String?           @map("last_daily_plan_date")
+  /// When true, content planner may bias toward historically stronger categories (diversity retained).
+  performanceOptimizationEnabled Boolean        @default(false) @map("performance_optimization_enabled")
+  createdAt                   DateTime          @default(now()) @map("created_at")
+  updatedAt                   DateTime          @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([enabled, runMode])
+  @@map("automation_configs")
+}
+
+model ContentPlan {
+  id               String            @id @default(uuid())
+  userId           String            @map("user_id")
+  plannedDate      DateTime          @map("planned_date") @db.Date
+  timezone         String            @default("UTC")
+  slotIndex        Int               @map("slot_index")
+  status           ContentPlanStatus @default(DRAFT)
+  category         String?
+  genre            String?
+  theme            String?
+  ideaTitle        String            @map("idea_title")
+  ideaSummary      String            @map("idea_summary") @db.Text
+  ideaFingerprint  String            @map("idea_fingerprint")
+  storyBrief       Json              @map("story_brief")
+  storyId          String?           @map("story_id")
+  approvedAt       DateTime?         @map("approved_at")
+  cancelledAt      DateTime?         @map("cancelled_at")
+  lastError        String?           @map("last_error")
+  idempotencyKey   String            @unique @map("idempotency_key")
+  metadata         Json              @default("{}")
+  createdAt        DateTime          @default(now()) @map("created_at")
+  updatedAt        DateTime          @updatedAt @map("updated_at")
+
+  user     User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  schedule ContentSchedule?
+
+  @@unique([userId, plannedDate, slotIndex])
+  @@index([userId])
+  @@index([plannedDate])
+  @@index([status])
+  @@index([ideaFingerprint])
+  @@index([userId, plannedDate])
+  @@map("content_plans")
+}
+
+model ContentSchedule {
+  id                     String                @id @default(uuid())
+  userId                 String                @map("user_id")
+  contentPlanId          String                @unique @map("content_plan_id")
+  status                 ContentScheduleStatus @default(PLANNED)
+  currentStage           AutomationStage       @default(PLANNING) @map("current_stage")
+  scheduledGenerationAt  DateTime?             @map("scheduled_generation_at")
+  scheduledPublishAt     DateTime?             @map("scheduled_publish_at")
+  storyId                String?               @map("story_id")
+  videoRenderId          String?               @map("video_render_id")
+  progress               Int                   @default(0)
+  retryCount             Int                   @default(0) @map("retry_count")
+  maxRetries             Int                   @default(3) @map("max_retries")
+  lastError              String?               @map("last_error")
+  pausedAt               DateTime?             @map("paused_at")
+  cancelledAt            DateTime?             @map("cancelled_at")
+  startedAt              DateTime?             @map("started_at")
+  completedAt            DateTime?             @map("completed_at")
+  stageStartedAt         DateTime?             @map("stage_started_at")
+  idempotencyKey         String                @unique @map("idempotency_key")
+  metadata               Json                  @default("{}")
+  createdAt              DateTime              @default(now()) @map("created_at")
+  updatedAt              DateTime              @updatedAt @map("updated_at")
+
+  user                   User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  contentPlan            ContentPlan            @relation(fields: [contentPlanId], references: [id], onDelete: Cascade)
+  scheduledPublications  ScheduledPublication[]
+  executions             AutomationExecution[]
+
+  @@index([userId])
+  @@index([status])
+  @@index([currentStage])
+  @@index([scheduledGenerationAt])
+  @@index([scheduledPublishAt])
+  @@index([userId, status])
+  @@index([status, scheduledGenerationAt])
+  @@map("content_schedules")
+}
+
+model ScheduledPublication {
+  id                String                      @id @default(uuid())
+  userId            String                      @map("user_id")
+  contentScheduleId String                      @map("content_schedule_id")
+  publishRecordId   String?                     @unique @map("publish_record_id")
+  channelId         String                      @map("channel_id")
+  platform          SocialPlatform
+  status            ScheduledPublicationStatus  @default(PENDING)
+  scheduledAt       DateTime                    @map("scheduled_at")
+  publishedAt       DateTime?                   @map("published_at")
+  retryCount        Int                         @default(0) @map("retry_count")
+  lastError         String?                     @map("last_error")
+  idempotencyKey    String                      @unique @map("idempotency_key")
+  metadata          Json                        @default("{}")
+  createdAt         DateTime                    @default(now()) @map("created_at")
+  updatedAt         DateTime                    @updatedAt @map("updated_at")
+
+  user            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  contentSchedule ContentSchedule  @relation(fields: [contentScheduleId], references: [id], onDelete: Cascade)
+  publishRecord   PublishRecord?   @relation(fields: [publishRecordId], references: [id], onDelete: SetNull)
+
+  @@unique([contentScheduleId, channelId])
+  @@index([userId])
+  @@index([status])
+  @@index([scheduledAt])
+  @@index([status, scheduledAt])
+  @@index([channelId])
+  @@index([userId, status, scheduledAt])
+  @@map("scheduled_publications")
+}
+
+model AutomationExecution {
+  id                String                     @id @default(uuid())
+  userId            String                     @map("user_id")
+  contentScheduleId String?                    @map("content_schedule_id")
+  contentPlanId     String?                    @map("content_plan_id")
+  stage             AutomationStage
+  status            AutomationExecutionStatus  @default(PENDING)
+  generationJobId   String?                    @map("generation_job_id")
+  attemptNumber     Int                        @default(1) @map("attempt_number")
+  lastError         String?                    @map("last_error")
+  startedAt         DateTime?                  @map("started_at")
+  completedAt       DateTime?                  @map("completed_at")
+  idempotencyKey    String                     @unique @map("idempotency_key")
+  metadata          Json                       @default("{}")
+  createdAt         DateTime                   @default(now()) @map("created_at")
+  updatedAt         DateTime                   @updatedAt @map("updated_at")
+
+  user            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  contentSchedule ContentSchedule? @relation(fields: [contentScheduleId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([contentScheduleId])
+  @@index([status])
+  @@index([stage])
+  @@index([userId, status])
+  @@index([generationJobId])
+  @@map("automation_executions")
+}
+
+model Notification {
+  id        String    @id @default(uuid())
+  userId    String    @map("user_id")
+  type      String
+  title     String
+  body      String    @db.Text
+  dedupeKey String?   @map("dedupe_key")
+  readAt    DateTime? @map("read_at")
+  metadata  Json      @default("{}")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, dedupeKey])
+  @@index([userId])
+  @@index([userId, readAt])
+  @@index([createdAt])
+  @@map("notifications")
+}
+
+model AutomationAuditLog {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  action    String
+  before    Json?
+  after     Json?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([createdAt])
+  @@index([userId, createdAt])
+  @@map("automation_audit_logs")
+}
+
+/// Aggregated production + cross-platform performance for one completed render.
+model VideoAnalytics {
+  id                         String                   @id @default(uuid())
+  userId                     String                   @map("user_id")
+  storyId                    String                   @map("story_id")
+  videoRenderId              String                   @unique @map("video_render_id")
+  title                      String?
+  category                   String?
+  publishedAt                DateTime?                @map("published_at")
+  renderDurationMs           Int?                     @map("render_duration_ms")
+  videoDurationSeconds       Float?                   @map("video_duration_seconds")
+  generationCostUsd          Decimal                  @default(0) @map("generation_cost_usd") @db.Decimal(12, 6)
+  renderingCostUsd           Decimal                  @default(0) @map("rendering_cost_usd") @db.Decimal(12, 6)
+  totalProductionCostUsd     Decimal                  @default(0) @map("total_production_cost_usd") @db.Decimal(12, 6)
+  costIsEstimate             Boolean                  @default(true) @map("cost_is_estimate")
+  platformsPublishedCount    Int                      @default(0) @map("platforms_published_count")
+  /// Sum of available platform views only; platforms without views are excluded.
+  aggregateViews             BigInt?                  @map("aggregate_views")
+  aggregateLikes             BigInt?                  @map("aggregate_likes")
+  aggregateComments          BigInt?                  @map("aggregate_comments")
+  aggregateShares            BigInt?                  @map("aggregate_shares")
+  aggregateEngagement        BigInt?                  @map("aggregate_engagement")
+  /// Method used for aggregates, e.g. sum_available_platforms_only
+  aggregationMethod          String                   @default("sum_available_platforms_only") @map("aggregation_method")
+  platformsWithViewsCount    Int                      @default(0) @map("platforms_with_views_count")
+  platformsWithEngagementCount Int                    @default(0) @map("platforms_with_engagement_count")
+  performanceStatus          ContentPerformanceStatus @default(UNKNOWN) @map("performance_status")
+  lastSyncedAt               DateTime?                @map("last_synced_at")
+  costBreakdown              Json                     @default("{}") @map("cost_breakdown")
+  metadata                   Json                     @default("{}")
+  createdAt                  DateTime                 @default(now()) @map("created_at")
+  updatedAt                  DateTime                 @updatedAt @map("updated_at")
+
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  videoRender VideoRender @relation(fields: [videoRenderId], references: [id], onDelete: Cascade)
+  platformPosts PlatformPostAnalytics[]
+
+  @@index([userId])
+  @@index([storyId])
+  @@index([publishedAt])
+  @@index([category])
+  @@index([userId, publishedAt])
+  @@index([performanceStatus])
+  @@map("video_analytics")
+}
+
+/// Normalized per-post metrics for one PublishRecord on one platform.
+model PlatformPostAnalytics {
+  id                      String                 @id @default(uuid())
+  userId                  String                 @map("user_id")
+  publishRecordId         String                 @unique @map("publish_record_id")
+  videoAnalyticsId        String?                @map("video_analytics_id")
+  videoRenderId           String?                @map("video_render_id")
+  channelId               String?                @map("channel_id")
+  platform                SocialPlatform
+  providerPostId          String?                @map("provider_post_id")
+  postUrl                 String?                @map("post_url")
+  publishedAt             DateTime?              @map("published_at")
+  views                   BigInt?
+  reach                   BigInt?
+  impressions             BigInt?
+  likes                   BigInt?
+  comments                BigInt?
+  shares                  BigInt?
+  saves                   BigInt?
+  watchTimeSeconds        Float?                 @map("watch_time_seconds")
+  averageWatchSeconds     Float?                 @map("average_watch_seconds")
+  completionRate          Float?                 @map("completion_rate")
+  engagementRate          Float?                 @map("engagement_rate")
+  followersGained         Int?                   @map("followers_gained")
+  /// Per-metric availability map: { views: { status, reason?, definition? }, ... }
+  metricAvailability      Json                   @default("{}") @map("metric_availability")
+  metricSource            AnalyticsMetricSource  @default(UNAVAILABLE) @map("metric_source")
+  lastSuccessfulSyncAt    DateTime?              @map("last_successful_sync_at")
+  lastSyncAttemptAt       DateTime?              @map("last_sync_attempt_at")
+  lastSyncError           String?                @map("last_sync_error")
+  syncFailCount           Int                    @default(0) @map("sync_fail_count")
+  /// Truncated provider payload (size-capped in application code).
+  rawProviderResponse     Json?                  @map("raw_provider_response")
+  platformMetricNotes     Json                   @default("{}") @map("platform_metric_notes")
+  createdAt               DateTime               @default(now()) @map("created_at")
+  updatedAt               DateTime               @updatedAt @map("updated_at")
+
+  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  publishRecord  PublishRecord   @relation(fields: [publishRecordId], references: [id], onDelete: Cascade)
+  videoAnalytics VideoAnalytics? @relation(fields: [videoAnalyticsId], references: [id], onDelete: SetNull)
+  channel        SocialChannel?  @relation(fields: [channelId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([platform])
+  @@index([videoRenderId])
+  @@index([channelId])
+  @@index([publishedAt])
+  @@index([userId, platform, publishedAt])
+  @@index([lastSuccessfulSyncAt])
+  @@map("platform_post_analytics")
+}
+
+/// Point-in-time snapshot for a reporting window (deduped by unique key).
+model AnalyticsSnapshot {
+  id             String   @id @default(uuid())
+  userId         String   @map("user_id")
+  /// day | week | month | custom
+  windowType     String   @map("window_type")
+  windowStart    DateTime @map("window_start")
+  windowEnd      DateTime @map("window_end")
+  /// Deterministic key: userId:windowType:startIso:endIso[:scope]
+  snapshotKey    String   @unique @map("snapshot_key")
+  scope          String   @default("overview")
+  platform       SocialPlatform?
+  metrics        Json     @default("{}")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([windowStart, windowEnd])
+  @@index([userId, windowType])
+  @@map("analytics_snapshots")
+}
+
+/// Rolled-up performance by content dimension (category, theme, genre, format, duration_bucket).
+model ContentPerformanceSummary {
+  id                String                   @id @default(uuid())
+  userId            String                   @map("user_id")
+  dimension         String
+  dimensionValue    String                   @map("dimension_value")
+  platform          SocialPlatform?
+  sampleSize        Int                      @default(0) @map("sample_size")
+  dateFrom          DateTime                 @map("date_from")
+  dateTo            DateTime                 @map("date_to")
+  avgViews          Float?                   @map("avg_views")
+  avgEngagement     Float?                   @map("avg_engagement")
+  avgEngagementRate Float?                   @map("avg_engagement_rate")
+  avgCompletionRate Float?                   @map("avg_completion_rate")
+  avgCostUsd        Float?                   @map("avg_cost_usd")
+  totalViews        BigInt?                  @map("total_views")
+  performanceStatus ContentPerformanceStatus @default(UNKNOWN) @map("performance_status")
+  supportingMetrics Json                     @default("{}") @map("supporting_metrics")
+  summaryKey        String                   @unique @map("summary_key")
+  createdAt         DateTime                 @default(now()) @map("created_at")
+  updatedAt         DateTime                 @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([dimension, dimensionValue])
+  @@index([userId, dimension])
+  @@map("content_performance_summaries")
+}
+
+/// Cached cost rollup derived from ProviderUsage (never duplicates usage rows).
+model CostBreakdown {
+  id                    String   @id @default(uuid())
+  userId                String   @map("user_id")
+  /// day | month | video | provider | stage
+  scopeType             String   @map("scope_type")
+  scopeKey              String   @map("scope_key")
+  storyId               String?  @map("story_id")
+  videoRenderId         String?  @map("video_render_id")
+  provider              String?
+  stage                 String?
+  periodStart           DateTime? @map("period_start")
+  periodEnd             DateTime? @map("period_end")
+  estimatedCostUsd      Decimal  @default(0) @map("estimated_cost_usd") @db.Decimal(12, 6)
+  actualCostUsd         Decimal? @map("actual_cost_usd") @db.Decimal(12, 6)
+  isEstimate            Boolean  @default(true) @map("is_estimate")
+  usageRecordCount      Int      @default(0) @map("usage_record_count")
+  failedRetryCostUsd    Decimal  @default(0) @map("failed_retry_cost_usd") @db.Decimal(12, 6)
+  breakdown             Json     @default("{}")
+  breakdownKey          String   @unique @map("breakdown_key")
+  createdAt             DateTime @default(now()) @map("created_at")
+  updatedAt             DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([scopeType])
+  @@index([provider])
+  @@index([storyId])
+  @@index([videoRenderId])
+  @@index([userId, scopeType, periodStart])
+  @@map("cost_breakdowns")
+}
+
+model AnalyticsSyncJob {
+  id                String                 @id @default(uuid())
+  userId            String                 @map("user_id")
+  jobType           AnalyticsSyncJobType   @map("job_type")
+  status            AnalyticsSyncJobStatus @default(PENDING)
+  platform          SocialPlatform?
+  publishRecordId   String?                @map("publish_record_id")
+  channelId         String?                @map("channel_id")
+  videoRenderId     String?                @map("video_render_id")
+  queueName         String?                @map("queue_name")
+  queueJobId        String?                @map("queue_job_id")
+  attemptCount      Int                    @default(0) @map("attempt_count")
+  maxAttempts       Int                    @default(5) @map("max_attempts")
+  progress          Int                    @default(0)
+  postsTargeted     Int                    @default(0) @map("posts_targeted")
+  postsSucceeded    Int                    @default(0) @map("posts_succeeded")
+  postsFailed       Int                    @default(0) @map("posts_failed")
+  postsSkipped      Int                    @default(0) @map("posts_skipped")
+  lastError         String?                @map("last_error")
+  platformResults   Json                   @default("{}") @map("platform_results")
+  payload           Json                   @default("{}")
+  startedAt         DateTime?              @map("started_at")
+  completedAt       DateTime?              @map("completed_at")
+  nextRetryAt       DateTime?              @map("next_retry_at")
+  idempotencyKey    String?                @unique @map("idempotency_key")
+  createdAt         DateTime               @default(now()) @map("created_at")
+  updatedAt         DateTime               @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([status])
+  @@index([jobType])
+  @@index([userId, status])
+  @@index([nextRetryAt])
+  @@map("analytics_sync_jobs")
+}
+
+model AnalyticsInsight {
+  id                 String                     @id @default(uuid())
+  userId             String                     @map("user_id")
+  recommendation     String                     @db.Text
+  supportingMetrics  Json                       @default("{}") @map("supporting_metrics")
+  sampleSize         Int                        @map("sample_size")
+  confidence         AnalyticsInsightConfidence
+  platform           SocialPlatform?
+  suggestedExperiment String                    @map("suggested_experiment") @db.Text
+  dateFrom           DateTime                   @map("date_from")
+  dateTo             DateTime                   @map("date_to")
+  category           String?
+  /// correlation_only | observational — never causation claims
+  evidenceType       String                     @default("observational") @map("evidence_type")
+  dismissedAt        DateTime?                  @map("dismissed_at")
+  metadata           Json                       @default("{}")
+  createdAt          DateTime                   @default(now()) @map("created_at")
+  updatedAt          DateTime                   @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([confidence])
+  @@index([userId, createdAt])
+  @@map("analytics_insights")
+}
+
+model AnalyticsOptimizationSettings {
+  id                              String   @id @default(uuid())
+  userId                          String   @unique @map("user_id")
+  performanceOptimizationEnabled  Boolean  @default(false) @map("performance_optimization_enabled")
+  minSampleSizeForOptimization    Int      @default(10) @map("min_sample_size_for_optimization")
+  preferStrongCategories          Boolean  @default(true) @map("prefer_strong_categories")
+  avoidWeakFormats                Boolean  @default(false) @map("avoid_weak_formats")
+  suggestDurationAdjustments      Boolean  @default(true) @map("suggest_duration_adjustments")
+  suggestCaptionExperiments       Boolean  @default(true) @map("suggest_caption_experiments")
+  diversityFloorPercent           Int      @default(30) @map("diversity_floor_percent")
+  insightLookbackDays             Int      @default(90) @map("insight_lookback_days")
+  syncRecentHours                 Int      @default(6) @map("sync_recent_hours")
+  syncOlderHours                  Int      @default(48) @map("sync_older_hours")
+  recentPostMaxAgeDays            Int      @default(7) @map("recent_post_max_age_days")
+  createdAt                       DateTime @default(now()) @map("created_at")
+  updatedAt                       DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("analytics_optimization_settings")
+}
+
+enum SystemAlertSeverity {
+  INFO
+  WARNING
+  CRITICAL
+}
+
+enum SystemAlertStatus {
+  OPEN
+  ACKNOWLEDGED
+  RESOLVED
+}
+
+enum BackupStatus {
+  PENDING
+  SUCCESS
+  FAILED
+  VERIFIED
+}
+
+/// Deduplicated operational alerts for admins (Phase 12).
+model SystemAlert {
+  id              String              @id @default(uuid())
+  dedupeKey       String              @unique @map("dedupe_key")
+  type            String
+  severity        SystemAlertSeverity @default(WARNING)
+  status          SystemAlertStatus   @default(OPEN)
+  title           String
+  body            String              @db.Text
+  metadata        Json                @default("{}")
+  occurrenceCount Int                 @default(1) @map("occurrence_count")
+  lastFiredAt     DateTime            @default(now()) @map("last_fired_at")
+  cooldownUntil   DateTime?           @map("cooldown_until")
+  resolvedAt      DateTime?           @map("resolved_at")
+  emailSentAt     DateTime?           @map("email_sent_at")
+  createdAt       DateTime            @default(now()) @map("created_at")
+  updatedAt       DateTime            @updatedAt @map("updated_at")
+
+  @@index([status, severity])
+  @@index([type])
+  @@index([lastFiredAt])
+  @@map("system_alerts")
+}
+
+model BackupRecord {
+  id           String       @id @default(uuid())
+  type         String       @default("postgres")
+  status       BackupStatus @default(PENDING)
+  fileName     String?      @map("file_name")
+  fileSizeBytes BigInt?     @map("file_size_bytes")
+  checksum     String?
+  destination  String?
+  errorMessage String?      @map("error_message") @db.Text
+  startedAt    DateTime     @default(now()) @map("started_at")
+  completedAt  DateTime?    @map("completed_at")
+  verifiedAt   DateTime?    @map("verified_at")
+  metadata     Json         @default("{}")
+  createdAt    DateTime     @default(now()) @map("created_at")
+  updatedAt    DateTime     @updatedAt @map("updated_at")
+
+  @@index([type, status])
+  @@index([startedAt])
+  @@map("backup_records")
+}
+
+/// Persistent record of work interrupted by emergency stop (Phase 12.1).
+/// Distinguishes local CANCELLED from external work that may still be running.
+model InterruptedTask {
+  id               String   @id @default(uuid())
+  userId           String?  @map("user_id")
+  entityType       String   @map("entity_type")
+  entityId         String   @map("entity_id")
+  previousStatus   String   @map("previous_status")
+  outcome          String
+  /// cancelled | interrupt_signaled | provider_cancel_unsupported | provider_cancelled | ffmpeg_kill_signaled
+  providerTaskId   String?  @map("provider_task_id")
+  provider         String?
+  queueName        String?  @map("queue_name")
+  queueJobId       String?  @map("queue_job_id")
+  reason           String
+  metadata         Json     @default("{}")
+  republishBlocked Boolean  @default(true) @map("republish_blocked")
+  resolvedAt       DateTime? @map("resolved_at")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  @@index([entityType, entityId])
+  @@index([outcome])
+  @@index([createdAt])
+  @@index([republishBlocked])
+  @@map("interrupted_tasks")
+}

@@ -1,0 +1,54 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* Dark obsidian enterprise palette + cyan primary (#00C2D6) */
+  --background: 216 28% 7%;
+  --foreground: 210 40% 96%;
+  --card: 215 25% 10%;
+  --card-foreground: 210 40% 96%;
+  --primary: 186 100% 42%;
+  --primary-foreground: 216 28% 7%;
+  --secondary: 215 20% 16%;
+  --secondary-foreground: 210 40% 96%;
+  --muted: 215 18% 14%;
+  --muted-foreground: 215 16% 65%;
+  --accent: 215 20% 16%;
+  --accent-foreground: 210 40% 96%;
+  --destructive: 0 72% 51%;
+  --destructive-foreground: 210 40% 98%;
+  --border: 215 18% 16%;
+  --input: 215 18% 16%;
+  --ring: 186 100% 42%;
+  --radius: 0.75rem;
+  --sidebar: 216 28% 8%;
+  --chart-grid: 215 18% 16%;
+  --chart-axis: 215 16% 65%;
+}
+
+* {
+  @apply border-border;
+}
+
+body {
+  @apply bg-background text-foreground antialiased;
+  margin: 0;
+  min-height: 100vh;
+}
+
+/* Scrollbar polish */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--border));
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground) / 0.45);
+}
