@@ -10,6 +10,7 @@ import {
   S3Client,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { buildSignedMediaContentUrl } from '@ai-video/shared';
 import { Readable } from 'node:stream';
 
 @Injectable()
@@ -101,6 +102,12 @@ export class StorageService implements OnModuleInit {
   }
 
   async getPresignedDownloadUrl(key: string, expiresIn = 3600) {
+    // Coolify / locked-down MinIO: serve via API HMAC URL (browser + Meta can fetch).
+    const apiProxyUrl = this.buildApiContentUrl(key, expiresIn);
+    if (apiProxyUrl) {
+      return apiProxyUrl;
+    }
+
     const command = new GetObjectCommand({
       Bucket: this.bucket,
       Key: key,
@@ -109,8 +116,54 @@ export class StorageService implements OnModuleInit {
     return this.rewritePublicUrl(url);
   }
 
+  async getObjectStream(key: string): Promise<{
+    body: Readable;
+    contentType?: string;
+    contentLength?: number;
+  }> {
+    const response = await this.client.send(
+      new GetObjectCommand({
+        Bucket: this.bucket,
+        Key: key,
+      }),
+    );
+    if (!response.Body) {
+      throw new Error(`Empty object body for key ${key}`);
+    }
+    return {
+      body: response.Body as Readable,
+      contentType: response.ContentType,
+      contentLength: response.ContentLength,
+    };
+  }
+
   getBucket() {
     return this.bucket;
+  }
+
+  /**
+   * Prefer API content proxy when MinIO is not publicly routed (Coolify default).
+   * Falls back to MINIO_PUBLIC_URL rewrite when explicitly configured.
+   */
+  buildApiContentUrl(key: string, expiresIn = 3600): string | null {
+    const publicBase =
+      this.config.get<string>('minio.publicUrl')?.trim() ||
+      this.config.get<string>('integrations.socialPublicMediaBaseUrl')?.trim();
+    // Explicit media-proxy still wins when operators configured it.
+    if (publicBase) return null;
+
+    const publicApiUrl = this.config.get<string>('app.publicApiUrl')?.trim();
+    const secret =
+      this.config.get<string>('security.credentialsEncryptionKey')?.trim() ||
+      this.config.get<string>('jwt.accessSecret')?.trim();
+    if (!publicApiUrl || !secret) return null;
+
+    return buildSignedMediaContentUrl({
+      publicApiUrl,
+      storageKey: key,
+      secret,
+      expiresInSeconds: expiresIn,
+    });
   }
 
   /** Rewrite internal MinIO host to MINIO_PUBLIC_URL (e.g. https://domain/media-proxy). */

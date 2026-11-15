@@ -2,9 +2,13 @@ import {
   BadRequestException,
   Injectable,
   NotFoundException,
+  UnauthorizedException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { MediaType, Prisma } from '@prisma/client';
+import { verifySignedMediaContent } from '@ai-video/shared';
 import { randomUUID } from 'node:crypto';
+import type { Readable } from 'node:stream';
 import { getPagination, paginationMeta } from '../../common/utils/pagination';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../../storage/storage.service';
@@ -19,6 +23,7 @@ export class MediaService {
     private readonly prisma: PrismaService,
     private readonly storage: StorageService,
     private readonly projectsService: ProjectsService,
+    private readonly config: ConfigService,
   ) {}
 
   async upload(
@@ -128,6 +133,30 @@ export class MediaService {
     }
     const url = await this.storage.getPresignedDownloadUrl(asset.storageKey, 900);
     return { url, expiresIn: 900 };
+  }
+
+  async streamSignedContent(
+    key: string,
+    exp: string,
+    sig: string,
+  ): Promise<{ body: Readable; contentType?: string; contentLength?: number }> {
+    const secret =
+      this.config.get<string>('security.credentialsEncryptionKey')?.trim() ||
+      this.config.get<string>('jwt.accessSecret')?.trim();
+    if (!secret) {
+      throw new UnauthorizedException('Media signing is not configured');
+    }
+    if (
+      !verifySignedMediaContent({
+        storageKey: key,
+        exp,
+        sig,
+        secret,
+      })
+    ) {
+      throw new UnauthorizedException('Invalid or expired media signature');
+    }
+    return this.storage.getObjectStream(key);
   }
 
   async remove(userId: string, id: string) {

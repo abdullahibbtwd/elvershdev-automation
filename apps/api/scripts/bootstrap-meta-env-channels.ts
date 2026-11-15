@@ -176,9 +176,23 @@ async function main() {
   console.log(`Instagram channel upserted: ${ig.id} (ig ${igId})`);
 }
 
+function formatAxiosError(err: unknown): string {
+  if (axios.isAxiosError(err)) {
+    const data = err.response?.data;
+    const graph =
+      data && typeof data === 'object'
+        ? JSON.stringify(data)
+        : typeof data === 'string'
+          ? data
+          : '';
+    return `${err.message}${graph ? ` — ${graph}` : ''}`;
+  }
+  return err instanceof Error ? err.message : String(err);
+}
+
 main()
   .catch((err) => {
-    console.error('Bootstrap failed:', err instanceof Error ? err.message : err);
+    console.error('Bootstrap failed:', formatAxiosError(err));
     process.exit(1);
   })
   .finally(async () => {

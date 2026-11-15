@@ -7,6 +7,7 @@ import {
   S3Client,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { buildSignedMediaContentUrl } from '@ai-video/shared';
 import type { Readable } from 'node:stream';
 
 let s3Client: S3Client | undefined;
@@ -94,6 +95,11 @@ export async function deleteObject(key: string): Promise<void> {
 }
 
 export async function getPresignedDownloadUrl(key: string, expiresIn = 900): Promise<string> {
+  const apiProxyUrl = buildApiContentUrl(key, expiresIn);
+  if (apiProxyUrl) {
+    return apiProxyUrl;
+  }
+
   const client = getClient();
   const command = new GetObjectCommand({
     Bucket: getMinioBucket(),
@@ -101,6 +107,27 @@ export async function getPresignedDownloadUrl(key: string, expiresIn = 900): Pro
   });
   const url = await getSignedUrl(client, command, { expiresIn });
   return rewritePublicUrl(url);
+}
+
+/** Coolify-safe public URL via API when MinIO is not published. */
+export function buildApiContentUrl(key: string, expiresIn = 900): string | null {
+  const publicBase =
+    process.env.MINIO_PUBLIC_URL?.trim() ||
+    process.env.SOCIAL_PUBLIC_MEDIA_BASE_URL?.trim();
+  if (publicBase) return null;
+
+  const publicApiUrl = process.env.PUBLIC_API_URL?.trim();
+  const secret =
+    process.env.CREDENTIALS_ENCRYPTION_KEY?.trim() ||
+    process.env.JWT_ACCESS_SECRET?.trim();
+  if (!publicApiUrl || !secret) return null;
+
+  return buildSignedMediaContentUrl({
+    publicApiUrl,
+    storageKey: key,
+    secret,
+    expiresInSeconds: expiresIn,
+  });
 }
 
 /** Rewrite internal MinIO host to MINIO_PUBLIC_URL / SOCIAL_PUBLIC_MEDIA_BASE_URL. */

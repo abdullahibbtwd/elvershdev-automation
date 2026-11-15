@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { createReadStream } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import type {
   ConnectedAccountInfo,
   NormalizedPostMetrics,
@@ -312,13 +312,17 @@ export class FacebookProvider extends BaseProvider implements SocialPublishingPr
 
       this.logger.log(`Facebook reel upload started for page ${pageId}`);
 
+      // rupload requires Content-Length; streams often omit it and Meta returns 400.
+      const bytes = await readFile(input.localFilePath);
+      const uploadSize = String(fileSize || bytes.length);
       const uploadClient = this.http.create();
-      await uploadClient.post(uploadUrl, createReadStream(input.localFilePath), {
+      await uploadClient.post(uploadUrl, bytes, {
         headers: {
           Authorization: `OAuth ${accessToken}`,
           offset: '0',
-          file_size: String(fileSize),
-          'Content-Type': input.mimeType ?? 'application/octet-stream',
+          file_size: uploadSize,
+          'Content-Length': uploadSize,
+          'Content-Type': 'application/octet-stream',
         },
         maxBodyLength: Infinity,
         maxContentLength: Infinity,

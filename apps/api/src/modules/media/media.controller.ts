@@ -7,13 +7,17 @@ import {
   ParseUUIDPipe,
   Post,
   Query,
+  Res,
+  StreamableFile,
   UploadedFile,
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiBearerAuth, ApiBody, ApiConsumes, ApiOperation, ApiTags } from '@nestjs/swagger';
+import type { Response } from 'express';
 import { memoryStorage } from 'multer';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { Public } from '../../common/decorators/public.decorator';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { ListMediaDto } from './dto/list-media.dto';
 import { PresignUploadDto } from './dto/presign-upload.dto';
@@ -66,6 +70,28 @@ export class MediaController {
   async list(@CurrentUser() user: AuthenticatedUser, @Query() query: ListMediaDto) {
     const result = await this.mediaService.list(user.id, query);
     return { success: true, data: result.items, meta: result.meta };
+  }
+
+  @Public()
+  @Get('content')
+  @ApiOperation({
+    summary: 'Stream media by HMAC-signed URL (browser/Meta; no MinIO public exposure)',
+  })
+  async content(
+    @Query('key') key: string,
+    @Query('exp') exp: string,
+    @Query('sig') sig: string,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const object = await this.mediaService.streamSignedContent(key, exp, sig);
+    if (object.contentType) {
+      res.setHeader('Content-Type', object.contentType);
+    }
+    if (object.contentLength != null) {
+      res.setHeader('Content-Length', String(object.contentLength));
+    }
+    res.setHeader('Cache-Control', 'private, max-age=300');
+    return new StreamableFile(object.body);
   }
 
   @Get(':id')
