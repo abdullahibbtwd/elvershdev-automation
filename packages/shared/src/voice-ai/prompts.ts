@@ -60,6 +60,7 @@ ${input.story}
 Scenes:
 ${scenesBlock}
 
+emotionalTone, speakingStyle, deliveryInstructions, and pronunciationGuidance must be flat strings (never objects).
 Return ONLY valid JSON matching this shape:
 {
   "fullText": "concatenated narration for the whole story",

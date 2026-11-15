@@ -8,7 +8,7 @@ export const storyBriefSchema = z.object({
   tone: z.string().min(2).max(100),
   desiredDurationSeconds: z.number().int().min(15).max(600),
   category: z.string().min(2).max(100),
-  additionalInstructions: z.string().max(2000).optional(),
+  additionalInstructions: z.string().max(8000).optional(),
 });
 
 export const generatedStorySchema = z.object({

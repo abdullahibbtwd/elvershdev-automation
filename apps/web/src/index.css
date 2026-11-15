@@ -31,10 +31,27 @@
   @apply border-border;
 }
 
+html {
+  color-scheme: dark;
+}
+
 body {
   @apply bg-background text-foreground antialiased;
   margin: 0;
   min-height: 100vh;
+}
+
+/* Native form controls inherit the dark surface instead of OS white defaults */
+select,
+input,
+textarea,
+button {
+  color-scheme: dark;
+}
+
+option {
+  background-color: hsl(var(--card));
+  color: hsl(var(--foreground));
 }
 
 /* Scrollbar polish */

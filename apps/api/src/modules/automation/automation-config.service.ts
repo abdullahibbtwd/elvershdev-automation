@@ -97,9 +97,15 @@ export class AutomationConfigService {
           : {}),
         ...(dto.storyGenres !== undefined ? { storyGenres: dto.storyGenres } : {}),
         ...(dto.themes !== undefined ? { themes: dto.themes } : {}),
-        ...(dto.targetAudience !== undefined ? { targetAudience: dto.targetAudience } : {}),
-        ...(dto.language !== undefined ? { language: dto.language } : {}),
-        ...(dto.tone !== undefined ? { tone: dto.tone } : {}),
+        ...(dto.targetAudience !== undefined
+          ? { targetAudience: dto.targetAudience.trim() || 'General audience' }
+          : {}),
+        ...(dto.language !== undefined
+          ? { language: dto.language.trim() || 'en' }
+          : {}),
+        ...(dto.tone !== undefined
+          ? { tone: dto.tone.trim() || 'Inspirational' }
+          : {}),
         ...(dto.targetDurationSeconds !== undefined
           ? { targetDurationSeconds: dto.targetDurationSeconds }
           : {}),

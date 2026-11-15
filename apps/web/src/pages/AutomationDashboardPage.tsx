@@ -1,5 +1,6 @@
+import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Bot, CalendarDays, Play, RefreshCw } from 'lucide-react';
+import { Bot, CalendarDays, FlaskConical, Play, Radio, RefreshCw } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { toast } from 'sonner';
 import { ErrorState } from '@/components/ErrorState';
@@ -7,8 +8,10 @@ import { LoadingState } from '@/components/LoadingState';
 import { EmptyState } from '@/components/EmptyState';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { useAutomationProgress } from '@/hooks/useAutomationProgress';
 import { api } from '@/lib/api';
 import { statusTone } from '@/lib/status';
+import { AUTOMATION_STAGE_ORDER } from '@ai-video/shared';
 
 type Schedule = {
   id: string;
@@ -63,6 +66,8 @@ function Stat({ label, value, hint }: { label: string; value: React.ReactNode; h
 
 export function AutomationDashboardPage() {
   const queryClient = useQueryClient();
+  const [liveScheduleId, setLiveScheduleId] = useState<string | null>(null);
+  const { connected, latest: liveEvent } = useAutomationProgress(liveScheduleId);
 
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['automation', 'dashboard'],
@@ -79,6 +84,32 @@ export function AutomationDashboardPage() {
       void invalidate();
     },
     onError: (_, key) => toast.error(`Action "${key}" failed`),
+  });
+
+  const testE2eMutation = useMutation({
+    mutationFn: async () => {
+      const res = await api.post('/automation/test-e2e');
+      return res.data.data as {
+        planId: string;
+        scheduleId: string;
+        status: string;
+        message: string;
+      };
+    },
+    onSuccess: (result) => {
+      toast.success(result.message || 'E2E pipeline started');
+      if (result.scheduleId) setLiveScheduleId(result.scheduleId);
+      void invalidate();
+    },
+    onError: (err: unknown) => {
+      const message =
+        (err as { response?: { data?: { message?: string | string[] } } })?.response?.data
+          ?.message;
+      const text = Array.isArray(message)
+        ? message.join(', ')
+        : message || 'E2E failed to start — check API/worker and provider keys in .env';
+      toast.error(text);
+    },
   });
 
   const retryMutation = useMutation({
@@ -101,7 +132,7 @@ export function AutomationDashboardPage() {
   if (error || !data)
     return <ErrorState message="Failed to load automation" onRetry={() => void refetch()} />;
 
-  const busy = actionMutation.isPending;
+  const busy = actionMutation.isPending || testE2eMutation.isPending;
 
   return (
     <div className="space-y-6">
@@ -119,25 +150,123 @@ export function AutomationDashboardPage() {
           </Button>
           <Link
             to="/automation/calendar"
-            className="inline-flex h-10 items-center gap-2 rounded-md border px-4 text-sm"
+            className="inline-flex h-10 items-center gap-2 rounded-md border border-input bg-card px-4 text-sm text-foreground transition-all duration-200 hover:border-primary/40"
           >
             <CalendarDays className="h-4 w-4" />
             Calendar
           </Link>
           <Link
             to="/automation/executions"
-            className="inline-flex h-10 items-center rounded-md border px-4 text-sm"
+            className="inline-flex h-10 items-center rounded-md border border-input bg-card px-4 text-sm text-foreground transition-all duration-200 hover:border-primary/40"
           >
             Executions
           </Link>
           <Link
             to="/automation/settings"
-            className="inline-flex h-10 items-center rounded-md border px-4 text-sm"
+            className="inline-flex h-10 items-center rounded-md border border-input bg-card px-4 text-sm text-foreground transition-all duration-200 hover:border-primary/40"
           >
             Settings
           </Link>
         </div>
       </div>
+
+      <div className="rounded-xl border border-primary/30 bg-gradient-to-br from-primary/10 via-card to-card p-5">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div className="max-w-xl space-y-1">
+            <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+              <FlaskConical className="h-4 w-4 text-primary" />
+              Test full pipeline
+            </div>
+            <p className="text-sm text-muted-foreground">
+              One click: invent a story, generate, render, and publish. With mocks off this
+              spends real AI credits and posts to your connected channels.
+            </p>
+          </div>
+          <Button
+            size="lg"
+            disabled={busy}
+            onClick={() => testE2eMutation.mutate()}
+            className="shrink-0"
+          >
+            <FlaskConical className="mr-2 h-4 w-4" />
+            {testE2eMutation.isPending ? 'Starting…' : 'Run E2E test'}
+          </Button>
+        </div>
+      </div>
+
+      {(liveScheduleId || liveEvent) && (
+        <div className="rounded-xl border border-border bg-card p-5">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <Radio
+                className={`h-4 w-4 ${connected ? 'text-emerald-400' : 'text-muted-foreground'}`}
+              />
+              <span className="text-sm font-medium">Live pipeline progress</span>
+              <Badge tone={connected ? 'success' : 'warning'}>
+                {connected ? 'Live' : 'Reconnecting…'}
+              </Badge>
+            </div>
+            {liveScheduleId && (
+              <span className="font-mono text-xs text-muted-foreground">
+                {liveScheduleId.slice(0, 8)}…
+              </span>
+            )}
+          </div>
+
+          {liveEvent ? (
+            <div className="mt-4 space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="text-sm">
+                  <span className="text-muted-foreground">Stage </span>
+                  <span className="font-medium">{liveEvent.stage}</span>
+                </div>
+                <Badge tone={statusTone(liveEvent.status)}>{liveEvent.status}</Badge>
+              </div>
+              <div className="h-2 overflow-hidden rounded-full bg-muted">
+                <div
+                  className="h-full rounded-full bg-primary transition-all duration-500"
+                  style={{ width: `${Math.min(100, liveEvent.progress ?? 0)}%` }}
+                />
+              </div>
+              <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+                <span>{liveEvent.message || 'Working…'}</span>
+                <span>{liveEvent.progress}%</span>
+              </div>
+              {liveEvent.error && (
+                <p className="text-sm text-destructive">{liveEvent.error}</p>
+              )}
+              <div className="flex flex-wrap gap-1.5 pt-1">
+                {AUTOMATION_STAGE_ORDER.map((stage) => {
+                  const currentIdx = AUTOMATION_STAGE_ORDER.indexOf(
+                    liveEvent.stage as (typeof AUTOMATION_STAGE_ORDER)[number],
+                  );
+                  const stageIdx = AUTOMATION_STAGE_ORDER.indexOf(stage);
+                  const done = stageIdx >= 0 && currentIdx >= 0 && stageIdx < currentIdx;
+                  const active = stage === liveEvent.stage;
+                  return (
+                    <span
+                      key={stage}
+                      className={`rounded px-1.5 py-0.5 text-[10px] ${
+                        active
+                          ? 'bg-primary/20 text-primary'
+                          : done
+                            ? 'bg-emerald-500/15 text-emerald-300'
+                            : 'bg-muted text-muted-foreground'
+                      }`}
+                    >
+                      {stage.replaceAll('_', ' ')}
+                    </span>
+                  );
+                })}
+              </div>
+            </div>
+          ) : (
+            <p className="mt-3 text-sm text-muted-foreground">
+              Waiting for first stage update…
+            </p>
+          )}
+        </div>
+      )}
 
       <div className="rounded-xl border border-border bg-card p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">

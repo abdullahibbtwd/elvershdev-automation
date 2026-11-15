@@ -1,9 +1,8 @@
 import type { Job, Processor } from 'bullmq';
 import { JobStatus, MotionGenerationStatus, Prisma } from '@prisma/client';
 import type { GenerationQueuePayload } from '@ai-video/shared';
-import { estimateKlingVideoCostUsd, getKlingPricingFromEnv } from '@ai-video/shared';
+import { estimateVideoGenerationCostUsd } from '@ai-video/shared';
 import { enqueueMotionPollJob } from '../lib/enqueue';
-import { getKlingModel, klingVideoProvider, shouldUseKlingMock } from '../lib/kling';
 import type { Logger } from '../lib/logger';
 import { getPrisma } from '../lib/prisma';
 import {
@@ -11,6 +10,13 @@ import {
   getMinioEndpoint,
   getPresignedDownloadUrl,
 } from '../lib/storage';
+import {
+  getVideoMaxPollAttempts,
+  getVideoPollIntervalSeconds,
+  resolveVideoProvider,
+  resolveVideoProviderId,
+  shouldUseVideoProviderMock,
+} from '../lib/video-providers';
 
 function isPubliclyFetchableEndpoint(url: string): boolean {
   try {
@@ -28,34 +34,50 @@ function isPubliclyFetchableEndpoint(url: string): boolean {
   }
 }
 
-async function resolveImageInput(storageKey: string): Promise<{
+/**
+ * Resolve a source image for the selected video provider.
+ * - Public/presigned MinIO URLs when the endpoint is reachable by external providers.
+ * - Otherwise download bytes for fal.storage upload (Hailuo) or base64 (Kling).
+ * Presign TTL is long enough for provider processing (Hailuo timeout + buffer).
+ */
+async function resolveImageInput(storageKey: string, providerId: string): Promise<{
   imageUrl: string;
   imageBase64?: string;
+  imageBytes?: Uint8Array;
+  imageMimeType?: string;
 }> {
   const publicBase =
     process.env.MINIO_PUBLIC_URL?.trim() || process.env.SOCIAL_PUBLIC_MEDIA_BASE_URL?.trim();
   const endpoint = getMinioEndpoint();
+  const hailuoTimeoutMs = Number.parseInt(process.env.HAILUO_TIMEOUT_MS ?? '600000', 10);
+  const presignTtlSeconds = Math.max(
+    3600,
+    Math.ceil(((Number.isFinite(hailuoTimeoutMs) ? hailuoTimeoutMs : 600_000) + 600_000) / 1000),
+  );
 
   if (publicBase || isPubliclyFetchableEndpoint(endpoint)) {
-    return { imageUrl: await getPresignedDownloadUrl(storageKey, 3600) };
+    return {
+      imageUrl: await getPresignedDownloadUrl(storageKey, presignTtlSeconds),
+    };
   }
 
-  // Local MinIO is not reachable by Kling — send base64 first-frame payload.
   const buffer = await downloadObject(storageKey);
+
+  if (providerId === 'hailuo') {
+    // Hailuo requires HTTP(S) image_url — provider will upload bytes via fal.storage.
+    return {
+      imageUrl: `local://minio/${storageKey}`,
+      imageBytes: buffer,
+      imageMimeType: 'image/png',
+      imageBase64: buffer.toString('base64'),
+    };
+  }
+
+  // Kling can accept base64 first-frame payloads when MinIO is not publicly reachable.
   return {
     imageUrl: `data:image/png;base64,${buffer.toString('base64')}`,
     imageBase64: buffer.toString('base64'),
   };
-}
-
-function getPollIntervalSeconds(): number {
-  const parsed = Number.parseInt(process.env.KLING_POLL_INTERVAL_SECONDS ?? '8', 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 8;
-}
-
-function getMaxPollAttempts(): number {
-  const parsed = Number.parseInt(process.env.KLING_MAX_POLL_ATTEMPTS ?? '90', 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 90;
 }
 
 export function createVideoGenerationProcessor(logger: Logger): Processor {
@@ -128,10 +150,17 @@ export function createVideoGenerationProcessor(logger: Logger): Processor {
         return { status: 'cancelled' };
       }
 
+      const providerId = resolveVideoProviderId(
+        motion.provider || data.provider || process.env.VIDEO_GENERATION_PROVIDER,
+      );
+      const provider = resolveVideoProvider(providerId);
+      const pollIntervalSeconds = getVideoPollIntervalSeconds(providerId);
+      const maxPollAttempts = getVideoMaxPollAttempts(providerId);
+
       // Idempotency: if provider task already exists, resume polling instead of resubmitting.
       if (motion.providerTaskId) {
         logger.info(
-          { motionGenerationId, providerTaskId: motion.providerTaskId },
+          { motionGenerationId, providerTaskId: motion.providerTaskId, provider: providerId },
           'Provider task already submitted; scheduling status poll',
         );
 
@@ -152,11 +181,12 @@ export function createVideoGenerationProcessor(logger: Logger): Processor {
             sceneId: motion.sceneId,
             providerTaskId: motion.providerTaskId,
             pollAttempt: Math.max(motion.pollAttempt, 1),
-            maxPollAttempts: getMaxPollAttempts(),
-            pollIntervalSeconds: getPollIntervalSeconds(),
-            useMockAi: data.useMockAi ?? shouldUseKlingMock(),
+            maxPollAttempts,
+            pollIntervalSeconds,
+            useMockAi: data.useMockAi ?? shouldUseVideoProviderMock(providerId),
+            provider: providerId,
           },
-          getPollIntervalSeconds() * 1000,
+          pollIntervalSeconds * 1000,
         );
 
         if (generationJobId) {
@@ -166,13 +196,14 @@ export function createVideoGenerationProcessor(logger: Logger): Processor {
               progress: 55,
               result: {
                 providerTaskId: motion.providerTaskId,
+                provider: providerId,
                 resumed: true,
               } as Prisma.InputJsonValue,
             },
           });
         }
 
-        return { status: 'polling', providerTaskId: motion.providerTaskId };
+        return { status: 'polling', providerTaskId: motion.providerTaskId, provider: providerId };
       }
 
       const submitting = await prisma.motionGeneration.updateMany({
@@ -191,53 +222,44 @@ export function createVideoGenerationProcessor(logger: Logger): Processor {
         return { status: 'cancelled' };
       }
 
-      const imageInput = await resolveImageInput(motion.sourceMediaAsset.storageKey);
-      const model = motion.providerModel || getKlingModel();
-      const forceMock = data.useMockAi === true || shouldUseKlingMock();
+      const imageInput = await resolveImageInput(motion.sourceMediaAsset.storageKey, providerId);
+      const model = motion.providerModel || provider.getModel();
+      const forceMock = data.useMockAi === true || shouldUseVideoProviderMock(providerId);
 
-      const submitResult = await klingVideoProvider.submitImageToVideo({
+      const submitInput = {
         imageUrl: imageInput.imageUrl,
         imageBase64: imageInput.imageBase64,
+        imageBytes: imageInput.imageBytes,
+        imageMimeType: imageInput.imageMimeType,
         motionPrompt: motion.motionPrompt,
         negativePrompt: motion.negativePrompt ?? undefined,
         durationSeconds: motion.durationSeconds,
         resolution: motion.resolution,
         model,
         externalTaskId: motion.id,
-        audio: 'off',
-      });
+        audio: 'off' as const,
+      };
 
-      // If forceMock was requested but provider wasn't in mock mode, re-submit with env override.
-      const finalSubmit =
-        forceMock && !submitResult.mock
-          ? await (async () => {
-              const previous = process.env.KLING_USE_MOCK;
-              process.env.KLING_USE_MOCK = 'true';
-              try {
-                return await klingVideoProvider.submitImageToVideo({
-                  imageUrl: imageInput.imageUrl,
-                  imageBase64: imageInput.imageBase64,
-                  motionPrompt: motion.motionPrompt,
-                  negativePrompt: motion.negativePrompt ?? undefined,
-                  durationSeconds: motion.durationSeconds,
-                  resolution: motion.resolution,
-                  model,
-                  externalTaskId: motion.id,
-                  audio: 'off',
-                });
-              } finally {
-                if (previous === undefined) delete process.env.KLING_USE_MOCK;
-                else process.env.KLING_USE_MOCK = previous;
-              }
-            })()
-          : submitResult;
+      let finalSubmit = await provider.submitImageToVideo(submitInput);
+
+      if (forceMock && !finalSubmit.mock) {
+        const mockEnvKey = providerId === 'kling' ? 'KLING_USE_MOCK' : 'HAILUO_USE_MOCK';
+        const previous = process.env[mockEnvKey];
+        process.env[mockEnvKey] = 'true';
+        try {
+          finalSubmit = await provider.submitImageToVideo(submitInput);
+        } finally {
+          if (previous === undefined) delete process.env[mockEnvKey];
+          else process.env[mockEnvKey] = previous;
+        }
+      }
 
       const estimatedCost =
         finalSubmit.estimatedCostUsd ||
-        estimateKlingVideoCostUsd(
+        estimateVideoGenerationCostUsd(
+          providerId,
           motion.durationSeconds,
           motion.resolution,
-          getKlingPricingFromEnv(),
         );
 
       const processingUpdate = await prisma.motionGeneration.updateMany({
@@ -246,7 +268,7 @@ export function createVideoGenerationProcessor(logger: Logger): Processor {
           status: { notIn: [MotionGenerationStatus.CANCELLED, MotionGenerationStatus.COMPLETED] },
         },
         data: {
-          provider: 'kling',
+          provider: providerId,
           providerModel: finalSubmit.model,
           providerTaskId: finalSubmit.providerTaskId,
           status: MotionGenerationStatus.PROCESSING,
@@ -261,6 +283,8 @@ export function createVideoGenerationProcessor(logger: Logger): Processor {
             audio: 'off',
             mock: Boolean(finalSubmit.mock),
             externalTaskId: motion.id,
+            provider: providerId,
+            requestId: finalSubmit.requestId ?? finalSubmit.providerTaskId,
           } as Prisma.InputJsonValue,
         },
       });
@@ -273,7 +297,7 @@ export function createVideoGenerationProcessor(logger: Logger): Processor {
           userId: motion.userId,
           storyId: motion.storyId,
           generationJobId,
-          provider: 'kling',
+          provider: providerId,
           model: finalSubmit.model,
           requestType: 'image_to_video_submit',
           estimatedCost: new Prisma.Decimal(estimatedCost),
@@ -284,6 +308,7 @@ export function createVideoGenerationProcessor(logger: Logger): Processor {
             durationSeconds: motion.durationSeconds,
             resolution: motion.resolution,
             estimated: true,
+            costKind: 'estimated',
           },
         },
       });
@@ -297,11 +322,12 @@ export function createVideoGenerationProcessor(logger: Logger): Processor {
           sceneId: motion.sceneId,
           providerTaskId: finalSubmit.providerTaskId,
           pollAttempt: 1,
-          maxPollAttempts: getMaxPollAttempts(),
-          pollIntervalSeconds: getPollIntervalSeconds(),
+          maxPollAttempts,
+          pollIntervalSeconds,
           useMockAi: forceMock,
+          provider: providerId,
         },
-        getPollIntervalSeconds() * 1000,
+        pollIntervalSeconds * 1000,
       );
 
       if (generationJobId) {
@@ -309,9 +335,11 @@ export function createVideoGenerationProcessor(logger: Logger): Processor {
           where: { id: generationJobId },
           data: {
             progress: 55,
+            provider: providerId,
             estimatedCost: new Prisma.Decimal(estimatedCost),
             result: {
               providerTaskId: finalSubmit.providerTaskId,
+              provider: providerId,
               submitted: true,
             } as Prisma.InputJsonValue,
           },
@@ -321,6 +349,7 @@ export function createVideoGenerationProcessor(logger: Logger): Processor {
       return {
         status: 'submitted',
         providerTaskId: finalSubmit.providerTaskId,
+        provider: providerId,
       };
     } catch (error) {
       const message = (error as Error).message || 'Video generation submit failed';

@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type { PublicUser } from '@ai-video/shared';
 import { api, getAccessToken, setAccessToken } from '@/lib/api';
+import { disconnectAutomationSocket } from '@/lib/socket';
 
 interface AuthState {
   user: PublicUser | null;
@@ -30,6 +31,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   clear: () => {
+    disconnectAutomationSocket();
     setAccessToken(null);
     set({
       user: null,

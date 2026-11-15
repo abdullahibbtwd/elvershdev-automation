@@ -2,9 +2,13 @@ import type { GeneratedStory, StoryBriefInput } from './schemas';
 
 export function buildStoryGenerationPrompt(brief: StoryBriefInput): string {
   return [
-    'You are an expert short-form video storyteller.',
-    'Generate an original story package as strict JSON matching the required schema.',
-    'Do not include markdown fences or commentary.',
+    'You are an expert short-form video storyteller for an international English-speaking audience.',
+    'Create ORIGINAL cinematic micro-stories — NOT generic motivational quote cards.',
+    'Return ONE JSON object with EXACTLY these top-level string keys:',
+    'title, story, openingHook, narrationScript, closingMessage, description,',
+    'plus hashtags (string array) and characters (array).',
+    'Do not nest story fields. Do not wrap the object. Do not use markdown fences.',
+    'character.appearance must be a single flat string (never an object).',
     '',
     `Topic: ${brief.topic}`,
     `Niche: ${brief.niche}`,
@@ -17,14 +21,18 @@ export function buildStoryGenerationPrompt(brief: StoryBriefInput): string {
       ? `Additional instructions: ${brief.additionalInstructions}`
       : '',
     '',
-    'Requirements:',
-    '- Compelling title',
-    '- Original full story narrative',
-    '- Strong opening hook',
-    '- Narration script suitable for voiceover',
-    '- Closing message',
-    '- Short description for social posts',
-    '- Relevant hashtags without # symbol duplication issues (plain tags ok)',
+    'Required character fields when characters are present:',
+    'name, appearance, clothing, ageRange, hair, distinctiveFeatures, consistencyNotes',
+    '',
+    'Story craft requirements:',
+    '- openingHook: powerful curiosity spike for the FIRST 2–3 seconds of voiceover',
+    '- story + narrationScript: keep viewers curious, then deliver an emotional or surprising turning point',
+    '- closingMessage: meaningful lesson that is NOT always "never give up" — vary endings (hope, kindness, perspective, courage, patience)',
+    '- narrationScript must be speakable aloud in about the desired duration (natural emotional English)',
+    '- description: platform-ready caption hook (1–2 sentences) without stuffing hashtags into it',
+    '- hashtags: 10–15 tags WITHOUT # prefix; mix niche + emotion + discovery (storytime, motivation, lifelessons, fyp, reels, shorts, etc.)',
+    '- Include a soft follow CTA near the end of narration (natural, not spammy)',
+    '- Prefer concrete characters and scenes over abstract advice',
     '- If recurring characters exist, include character profiles with stable appearance details',
   ]
     .filter(Boolean)
@@ -46,8 +54,12 @@ export function buildScenePlanningPrompt(input: {
       : '- None specified; invent only if essential and keep them consistent.';
 
   return [
-    'You are a film director planning AI-generated video scenes.',
-    'Return strict JSON matching the required schema. No markdown.',
+    'You are a film director planning AI-generated vertical (9:16) cinematic scenes.',
+    'Return ONE JSON object with keys: totalDurationSeconds (number), scenes (array), characters (array).',
+    'Each scene MUST use EXACT flat string fields:',
+    'sceneNumber, durationSeconds, narration, visualDescription, imagePrompt, videoPrompt,',
+    'cameraMovement, lighting, environment, characterConsistencyInstructions.',
+    'lighting and environment must be strings, never objects. No markdown fences.',
     '',
     `Target total duration seconds: ${input.brief.desiredDurationSeconds}`,
     `Language: ${input.brief.language}`,
@@ -55,6 +67,7 @@ export function buildScenePlanningPrompt(input: {
     `Niche: ${input.brief.niche}`,
     '',
     `Title: ${input.story.title}`,
+    `Opening hook: ${input.story.openingHook}`,
     `Story: ${input.story.story}`,
     `Narration script: ${input.story.narrationScript}`,
     '',
@@ -62,9 +75,14 @@ export function buildScenePlanningPrompt(input: {
     characterBlock,
     '',
     'Requirements:',
+    '- Plan 6–9 scenes when duration is 40–60s (fewer only if the story is shorter)',
+    '- Scene 1 must visualize the hook in the first 2–3 seconds',
+    '- Mid scenes should raise curiosity; include a clear turning-point scene',
+    '- Final scene should land the lesson / emotional payoff',
+    '- Visual style: cinematic photorealism, emotional lighting, vertical composition',
     '- Break the narration into ordered scenes',
     '- Sum of scene durations MUST approximately equal the target duration (within ~10%)',
-    '- Each scene needs narration, visual description, image prompt, video prompt, camera, lighting, environment, and character consistency instructions',
     '- Reuse the same character appearance details whenever a character appears',
+    '- imagePrompt and videoPrompt must be concrete, filmable, and consistent with the narration',
   ].join('\n');
 }

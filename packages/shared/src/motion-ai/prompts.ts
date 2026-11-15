@@ -58,6 +58,7 @@ ${JSON.stringify(input.characters, null, 2)}
 Scenes:
 ${JSON.stringify(input.scenes, null, 2)}
 
+Every field value must be a flat string (never nested objects) except sceneNumber (number).
 Return ONLY valid JSON matching this shape:
 {
   "scenes": [

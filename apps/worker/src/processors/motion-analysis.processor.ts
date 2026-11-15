@@ -10,6 +10,7 @@ import { analyzeMotion } from '../lib/gemini';
 import { enqueueGenerationJob } from '../lib/enqueue';
 import type { Logger } from '../lib/logger';
 import { getPrisma } from '../lib/prisma';
+import { shouldUseVideoProviderMock } from '../lib/video-providers';
 
 export function createMotionAnalysisProcessor(logger: Logger): Processor {
   return async (job: Job<GenerationQueuePayload>) => {
@@ -230,13 +231,16 @@ export function createMotionAnalysisProcessor(logger: Logger): Processor {
           },
         });
 
+        const videoProvider =
+          motion.provider || process.env.VIDEO_GENERATION_PROVIDER || 'hailuo';
+
         const videoJob = await prisma.generationJob.create({
           data: {
             userId: data.userId,
             storyId: motion.storyId,
             jobType: 'VIDEO',
             status: JobStatus.PENDING,
-            provider: 'kling',
+            provider: videoProvider,
             queueName: JOB_TYPE_TO_QUEUE.VIDEO,
             maxAttempts: 3,
             payload: {
@@ -244,6 +248,7 @@ export function createMotionAnalysisProcessor(logger: Logger): Processor {
               motionGenerationId: motion.id,
               sceneId: motion.sceneId,
               sourceVisualId: motion.sourceVisualId,
+              provider: videoProvider,
             } as Prisma.InputJsonValue,
           },
         });
@@ -264,12 +269,14 @@ export function createMotionAnalysisProcessor(logger: Logger): Processor {
             sceneVisualId: motion.sourceVisualId,
             motionGenerationId: motion.id,
             jobType: 'VIDEO',
-            provider: 'kling',
+            provider: videoProvider,
             payload: {
               action: 'submit_image_to_video',
               motionGenerationId: motion.id,
+              provider: videoProvider,
             },
-            useMockAi: data.useMockAi,
+            // Never inherit Gemini/analysis mock into Hailuo/Kling generation.
+            useMockAi: shouldUseVideoProviderMock(videoProvider),
             simulateFailure: data.simulateFailure,
           },
         );

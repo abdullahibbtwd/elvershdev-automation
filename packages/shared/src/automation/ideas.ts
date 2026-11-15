@@ -1,4 +1,5 @@
 import { ideaFingerprint, isNearDuplicateIdea } from './fingerprint';
+import { resolveDailySlot, type DailySlotProfile } from './slots';
 
 export interface ContentIdeaSeed {
   title: string;
@@ -7,6 +8,9 @@ export interface ContentIdeaSeed {
   genre: string;
   theme: string;
   topic: string;
+  /** morning | evening when generated for a daily slot */
+  slotKind?: string;
+  slotLabel?: string;
 }
 
 const IDEA_TEMPLATES: Array<(ctx: IdeaContext) => ContentIdeaSeed> = [
@@ -84,6 +88,9 @@ export function generateUniqueContentIdeas(input: {
   tone: string;
   exclusions: string[];
   daySalt: string;
+  /** Absolute slot index for the first idea (existing plans length). */
+  startingSlotIndex?: number;
+  dailySlots?: DailySlotProfile[];
   recent: Array<{ title: string; summary: string; fingerprint?: string }>;
 }): ContentIdeaSeed[] {
   const ideas: ContentIdeaSeed[] = [];
@@ -94,14 +101,34 @@ export function generateUniqueContentIdeas(input: {
     title: item.title,
     summary: item.summary,
   }));
+  const startingSlotIndex = input.startingSlotIndex ?? 0;
 
   let attempt = 0;
   while (ideas.length < input.count && attempt < input.count * 12) {
-    const category = selectCategory(input, attempt);
+    const absoluteSlot = startingSlotIndex + ideas.length;
+    const slot = resolveDailySlot(absoluteSlot, input.dailySlots);
+    const category = selectCategory(
+      {
+        ...input,
+        preferredCategories: [
+          ...slot.preferredCategories,
+          ...(input.preferredCategories ?? []),
+        ],
+      },
+      attempt,
+      slot,
+    );
     const genre =
       input.genres[attempt % Math.max(input.genres.length, 1)] || 'Cinematic storytelling';
+    const themePool = [
+      ...slot.preferredThemes.filter((t) =>
+        input.themes.length ? input.themes.some((x) => x.toLowerCase() === t.toLowerCase()) : true,
+      ),
+      ...input.themes,
+      ...slot.preferredThemes,
+    ];
     const theme =
-      input.themes[attempt % Math.max(input.themes.length, 1)] ||
+      themePool[attempt % Math.max(themePool.length, 1)] ||
       ['resilience', 'ambition', 'belonging', 'redemption'][attempt % 4];
     const template = IDEA_TEMPLATES[attempt % IDEA_TEMPLATES.length];
     const seed = template({
@@ -110,11 +137,14 @@ export function generateUniqueContentIdeas(input: {
       category,
       genre,
       theme,
-      tone: input.tone,
+      tone: slot.toneHint || input.tone,
       exclusions: input.exclusions,
-      slotIndex: ideas.length,
+      slotIndex: absoluteSlot,
       daySalt: `${input.daySalt}:${attempt}`,
     });
+
+    seed.slotKind = slot.kind;
+    seed.slotLabel = slot.label;
 
     // Slot-specific uniqueness salt to avoid identical daily titles
     seed.title = `${seed.title} (${input.daySalt.slice(-4)}-${ideas.length + 1})`;
@@ -164,6 +194,7 @@ function selectCategory(
     deprioritizedCategories?: string[];
   },
   index: number,
+  slot?: DailySlotProfile,
 ): string {
   const categories = input.categories.length ? input.categories : ['Narrative'];
   const preferredNames = new Set(
@@ -172,24 +203,36 @@ function selectCategory(
   const deprioritizedNames = new Set(
     (input.deprioritizedCategories ?? []).map((category) => category.toLowerCase()),
   );
-  const preferred = categories.filter((category) => preferredNames.has(category.toLowerCase()));
+
+  // Prefer slot categories that exist in the user's configured list; otherwise use slot list as-is.
+  const slotPreferred = (slot?.preferredCategories ?? [])
+    .map((name) => categories.find((c) => c.toLowerCase() === name.toLowerCase()) ?? name)
+    .filter(Boolean);
+  const preferredFromConfig = categories.filter((category) =>
+    preferredNames.has(category.toLowerCase()),
+  );
+  const preferred = [...slotPreferred, ...preferredFromConfig].filter(
+    (category, i, arr) => arr.findIndex((x) => x.toLowerCase() === category.toLowerCase()) === i,
+  );
+
   const regular = categories.filter(
     (category) =>
-      !preferredNames.has(category.toLowerCase()) &&
+      !preferred.some((p) => p.toLowerCase() === category.toLowerCase()) &&
       !deprioritizedNames.has(category.toLowerCase()),
   );
-  const nonPreferred = categories.filter((category) => !preferredNames.has(category.toLowerCase()));
+  const nonPreferred = categories.filter(
+    (category) => !preferred.some((p) => p.toLowerCase() === category.toLowerCase()),
+  );
 
-  // Three out of five slots favor preferred categories. The remaining slots
-  // continue rotating through every other category so diversity is preserved.
-  if (preferred.length && index % 5 < 3) {
-    return preferred[Math.floor(index / 5 + (index % 5)) % preferred.length]!;
+  // Strongly favor the daily slot's preferred categories, with occasional diversity.
+  if (preferred.length && index % 4 < 3) {
+    return preferred[Math.floor(index / 4 + (index % 4)) % preferred.length]!;
   }
-  if (regular.length && index % 5 === 3) {
-    return regular[Math.floor(index / 5) % regular.length]!;
+  if (regular.length && index % 4 === 3) {
+    return regular[Math.floor(index / 4) % regular.length]!;
   }
   const diversityPool = nonPreferred.length ? nonPreferred : categories;
-  return diversityPool[Math.floor(index / 5 + (index % 5)) % diversityPool.length]!;
+  return diversityPool[Math.floor(index / 4 + (index % 4)) % diversityPool.length]!;
 }
 
 export function fingerprintIdea(idea: ContentIdeaSeed): string {

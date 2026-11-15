@@ -84,3 +84,86 @@ export function getKlingModelCapabilities(
 export function getKlingSubmitPath(model?: string): string {
   return getKlingModelCapabilities(model).submitPath;
 }
+
+export type HailuoResolution = '512P' | '768P';
+export type HailuoDuration = 6 | 10;
+
+export interface HailuoModelCapabilities {
+  modelId: string;
+  endpointId: string;
+  supportedDurations: HailuoDuration[];
+  supportedResolutions: HailuoResolution[];
+  supportsPromptOptimizer: boolean;
+  supportsEndImage: boolean;
+  /** end_image_url is only accepted at 768P on the Standard endpoint */
+  endImageRequiresResolution: HailuoResolution;
+  supportsNegativePrompt: boolean;
+  maxPromptChars: number;
+  imageFormats: string[];
+  maxImageBytes: number;
+  minImageEdgePx: number;
+  aspectRatioMin: number;
+  aspectRatioMax: number;
+  cancelSupported: boolean;
+  defaultDuration: HailuoDuration;
+  defaultResolution: HailuoResolution;
+  defaultPromptOptimizer: boolean;
+}
+
+const HAILUO_02_STANDARD: HailuoModelCapabilities = {
+  modelId: 'fal-ai/minimax/hailuo-02/standard/image-to-video',
+  endpointId: 'fal-ai/minimax/hailuo-02/standard/image-to-video',
+  supportedDurations: [6, 10],
+  supportedResolutions: ['512P', '768P'],
+  supportsPromptOptimizer: true,
+  supportsEndImage: true,
+  endImageRequiresResolution: '768P',
+  supportsNegativePrompt: false,
+  maxPromptChars: 2500,
+  imageFormats: ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.avif'],
+  maxImageBytes: 20 * 1024 * 1024,
+  minImageEdgePx: 300,
+  aspectRatioMin: 2 / 5,
+  aspectRatioMax: 5 / 2,
+  cancelSupported: false,
+  defaultDuration: 6,
+  defaultResolution: '768P',
+  defaultPromptOptimizer: true,
+};
+
+export function getHailuoModelCapabilities(
+  model?: string,
+  env: Record<string, string | undefined> = {},
+): HailuoModelCapabilities {
+  const selected = (
+    model ||
+    env.HAILUO_MODEL ||
+    'fal-ai/minimax/hailuo-02/standard/image-to-video'
+  ).trim();
+
+  const defaultResolutionRaw = (env.HAILUO_DEFAULT_RESOLUTION ?? '768P').toUpperCase();
+  const defaultResolution: HailuoResolution =
+    defaultResolutionRaw === '512P' ? '512P' : '768P';
+  const defaultDurationRaw = Number.parseInt(env.HAILUO_DEFAULT_DURATION ?? '6', 10);
+  const defaultDuration: HailuoDuration = defaultDurationRaw === 10 ? 10 : 6;
+  const defaultPromptOptimizer = env.HAILUO_PROMPT_OPTIMIZER !== 'false';
+
+  return {
+    ...HAILUO_02_STANDARD,
+    modelId: selected,
+    endpointId: selected,
+    defaultDuration,
+    defaultResolution,
+    defaultPromptOptimizer,
+  };
+}
+
+export function normalizeHailuoResolution(resolution: string | undefined): HailuoResolution {
+  const normalized = String(resolution || '768P').toUpperCase();
+  return normalized === '512P' ? '512P' : '768P';
+}
+
+export function normalizeHailuoDuration(duration: number | string | undefined): HailuoDuration {
+  const value = typeof duration === 'string' ? Number.parseInt(duration, 10) : Number(duration);
+  return value === 10 ? 10 : 6;
+}

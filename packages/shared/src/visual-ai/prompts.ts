@@ -81,7 +81,8 @@ Rules:
 3. For each scene, include every listed structured field and a detailed imagePrompt plus negativePrompt.
 4. Prefer photorealistic cinematic language. Avoid cartoon/illustrated looks unless the style explicitly asks for it.
 5. imagePrompt must incorporate canonical character descriptions for characters present in that scene.
-6. Return JSON only matching:
+6. All string fields must be flat strings (never nested objects). environment and lighting are plain strings.
+7. Return JSON only matching:
 {
   "characters": [{
     "name": string,

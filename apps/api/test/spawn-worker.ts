@@ -17,6 +17,8 @@ export function spawnWorkerProcess(
       GEMINI_USE_MOCK: 'true',
       GEMINI_TTS_USE_MOCK: 'true',
       FAL_USE_MOCK: 'true',
+      VIDEO_GENERATION_PROVIDER: env.VIDEO_GENERATION_PROVIDER ?? 'hailuo',
+      HAILUO_USE_MOCK: 'true',
       KLING_USE_MOCK: 'true',
     },
     stdio: ['ignore', 'pipe', 'pipe'],

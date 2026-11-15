@@ -20,6 +20,11 @@ describe('Motion AI Phase 6 (e2e)', () => {
   beforeAll(async () => {
     process.env.GEMINI_USE_MOCK = 'true';
     process.env.FAL_USE_MOCK = 'true';
+    process.env.VIDEO_GENERATION_PROVIDER = 'hailuo';
+    process.env.HAILUO_USE_MOCK = 'true';
+    process.env.HAILUO_MOCK_READY_AFTER_MS = '500';
+    process.env.HAILUO_POLL_INTERVAL_SECONDS = '1';
+    process.env.KLING_ENABLED = 'false';
     process.env.KLING_USE_MOCK = 'true';
     process.env.KLING_MOCK_READY_AFTER_MS = '500';
     process.env.KLING_POLL_INTERVAL_SECONDS = '1';
@@ -49,6 +54,11 @@ describe('Motion AI Phase 6 (e2e)', () => {
       ...process.env,
       GEMINI_USE_MOCK: 'true',
       FAL_USE_MOCK: 'true',
+      VIDEO_GENERATION_PROVIDER: 'hailuo',
+      HAILUO_USE_MOCK: 'true',
+      HAILUO_MOCK_READY_AFTER_MS: '500',
+      HAILUO_POLL_INTERVAL_SECONDS: '1',
+      KLING_ENABLED: 'false',
       KLING_USE_MOCK: 'true',
       KLING_MOCK_READY_AFTER_MS: '500',
       KLING_POLL_INTERVAL_SECONDS: '1',
@@ -218,11 +228,12 @@ describe('Motion AI Phase 6 (e2e)', () => {
     const queued = await request(app.getHttpServer())
       .post(`/api/stories/${story.id}/motion/generate`)
       .set('Authorization', `Bearer ${accessTokenA}`)
-      .send({ durationSeconds: 5, resolution: '720p' })
+      .send({ provider: 'hailuo', durationSeconds: 6, resolution: '768P' })
       .expect(201);
 
     expect(queued.body.data.job.jobType).toBe('MOTION_ANALYSIS');
     expect(queued.body.data.motionGenerations.length).toBe(story.scenes.length);
+    expect(queued.body.data.motionGenerations[0].provider).toBe('hailuo');
 
     const progress = await waitForMotionProgress(story.id);
     expect(progress.percentComplete).toBe(100);
@@ -240,12 +251,13 @@ describe('Motion AI Phase 6 (e2e)', () => {
       const selected = scene.motions.find((m: { isSelected: boolean }) => m.isSelected);
       expect(selected.status).toBe('COMPLETED');
       expect(selected.downloadUrl).toContain('http');
+      expect(selected.provider).toBe('hailuo');
       expect(selected.providerModel).toContain('mock:');
     }
 
     const usages = await prisma.providerUsage.findMany({ where: { storyId: story.id } });
     expect(usages.some((u) => u.requestType === 'motion_analysis')).toBe(true);
-    expect(usages.some((u) => u.provider === 'kling')).toBe(true);
+    expect(usages.some((u) => u.provider === 'hailuo')).toBe(true);
 
     const firstSceneId = story.scenes[0].id as string;
     const sceneMotions = await request(app.getHttpServer())

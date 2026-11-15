@@ -24,6 +24,7 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
 import { OpsModule } from './modules/ops/ops.module';
 import { ProjectsModule } from './modules/projects/projects.module';
 import { PublishingModule } from './modules/publishing/publishing.module';
+import { RealtimeModule } from './modules/realtime/realtime.module';
 import { RenderingModule } from './modules/rendering/rendering.module';
 import { SchedulingModule } from './modules/scheduling/scheduling.module';
 import { SettingsModule } from './modules/settings/settings.module';
@@ -104,6 +105,7 @@ import { StorageModule } from './storage/storage.module';
     AutomationModule,
     AnalyticsModule,
     NotificationsModule,
+    RealtimeModule,
     SettingsModule,
     OpsModule,
   ],

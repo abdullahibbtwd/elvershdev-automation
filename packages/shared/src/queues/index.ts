@@ -120,6 +120,8 @@ export interface MotionPollQueuePayload {
   pollAttempt: number;
   maxPollAttempts: number;
   pollIntervalSeconds: number;
+  /** Video generation provider id (hailuo | kling). Falls back to MotionGeneration.provider. */
+  provider?: string;
   useMockAi?: boolean;
   simulateFailure?: boolean;
 }
@@ -132,6 +134,8 @@ export interface MotionDownloadQueuePayload {
   sceneId: string;
   providerTaskId: string;
   videoUrl?: string;
+  /** Video generation provider id (hailuo | kling). Falls back to MotionGeneration.provider. */
+  provider?: string;
   useMockAi?: boolean;
   simulateFailure?: boolean;
 }

@@ -3,7 +3,13 @@ import { access, mkdir, rm, writeFile } from 'node:fs/promises';
 import { constants as fsConstants } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { FFMPEG_DEFAULT_TIMEOUT_MS, type VideoOutputProfile } from '@ai-video/shared';
+import {
+  FFMPEG_DEFAULT_TIMEOUT_MS,
+  type SubtitleCue,
+  type SubtitleStyle,
+  type VideoOutputProfile,
+} from '@ai-video/shared';
+import { prepareSubtitleOverlays, writeSubtitleOverlayInputs } from './subtitle-burn';
 
 export interface FfmpegRunOptions {
   args: string[];
@@ -401,24 +407,28 @@ export class FfmpegService {
 
     const inputs: string[] = [];
     const filterParts: string[] = [];
+    const totalDur = Math.max(0.1, options.totalDurationSeconds);
     options.sceneAudioPaths.forEach((clip, index) => {
       inputs.push('-i', clip.path);
       const delayMs = Math.max(0, Math.round(clip.startSeconds * 1000));
       const volume = options.narrationVolume ?? 1;
+      // adelay + apad so every scene spans the full timeline before amix.
       filterParts.push(
-        `[${index}:a]aformat=sample_rates=${options.profile.audioSampleRate}:channel_layouts=stereo,volume=${volume},atrim=0:${clip.durationSeconds.toFixed(3)},asetpts=PTS-STARTPTS,adelay=${delayMs}|${delayMs}[a${index}]`,
+        `[${index}:a]aformat=sample_rates=${options.profile.audioSampleRate}:channel_layouts=stereo,volume=${volume},atrim=0:${clip.durationSeconds.toFixed(3)},asetpts=PTS-STARTPTS,adelay=${delayMs}|${delayMs},apad=whole_dur=${totalDur.toFixed(3)}[a${index}]`,
       );
     });
 
     const mixInputs = options.sceneAudioPaths.map((_, index) => `[a${index}]`).join('');
     const fadeIn = options.fadeInSeconds ?? 0;
     const fadeOut = options.fadeOutSeconds ?? 0;
-    let mixFilter = `${mixInputs}amix=inputs=${options.sceneAudioPaths.length}:duration=longest:dropout_transition=0:normalize=0[amixed]`;
+    // filterParts must be included — without them FFmpeg remaps input 0 onto every [aN] pad
+    // and the mix collapses to the first scene's duration only.
+    let mixFilter = `${filterParts.join(';')};${mixInputs}amix=inputs=${options.sceneAudioPaths.length}:duration=first:dropout_transition=0:normalize=0[amixed]`;
     if (fadeIn > 0 || fadeOut > 0) {
       const fadeFilters: string[] = [];
       if (fadeIn > 0) fadeFilters.push(`afade=t=in:st=0:d=${fadeIn.toFixed(3)}`);
       if (fadeOut > 0) {
-        const start = Math.max(0, options.totalDurationSeconds - fadeOut);
+        const start = Math.max(0, totalDur - fadeOut);
         fadeFilters.push(`afade=t=out:st=${start.toFixed(3)}:d=${fadeOut.toFixed(3)}`);
       }
       mixFilter += `;[amixed]${fadeFilters.join(',')}[aout]`;
@@ -435,7 +445,7 @@ export class FfmpegService {
         '-map',
         '[aout]',
         '-t',
-        options.totalDurationSeconds.toFixed(3),
+        totalDur.toFixed(3),
         '-c:a',
         options.profile.audioCodec,
         '-ar',
@@ -444,7 +454,7 @@ export class FfmpegService {
         String(options.profile.audioChannels),
         options.outputPath,
       ],
-      timeoutMs: Math.max(60_000, options.totalDurationSeconds * 10_000),
+      timeoutMs: Math.max(60_000, totalDur * 10_000),
       signal: options.signal,
     });
 
@@ -636,22 +646,84 @@ export class FfmpegService {
     assSubtitlePath?: string | null;
     srtSubtitlePath?: string | null;
     burnSubtitles?: boolean;
+    subtitleCues?: SubtitleCue[];
+    subtitleStyle?: SubtitleStyle;
+    workDir?: string;
     signal?: AbortSignal;
   }): Promise<string> {
+    const videoProbe = await this.probeMedia(options.videoPath, options.signal);
+    const duration = videoProbe.durationSeconds;
+    const wantBurn = Boolean(options.burnSubtitles);
+
     const canBurnAss =
-      Boolean(options.burnSubtitles && options.assSubtitlePath) && (await this.hasFilter('ass'));
+      wantBurn && Boolean(options.assSubtitlePath) && (await this.hasFilter('ass'));
+    const canBurnSubtitlesFilter =
+      wantBurn &&
+      Boolean(options.assSubtitlePath || options.srtSubtitlePath) &&
+      (await this.hasFilter('subtitles'));
 
     if (canBurnAss && options.assSubtitlePath) {
-      const escaped = escapeFilterPath(options.assSubtitlePath);
-      await this.run({
-        args: [
+      await this.muxWithVideoFilter({
+        videoPath: options.videoPath,
+        audioPath: options.audioPath,
+        outputPath: options.outputPath,
+        profile: options.profile,
+        videoFilter: `ass='${escapeFilterPath(options.assSubtitlePath)}'`,
+        durationSeconds: duration,
+        signal: options.signal,
+      });
+      return options.outputPath;
+    }
+
+    if (canBurnSubtitlesFilter) {
+      const subPath = options.assSubtitlePath || options.srtSubtitlePath;
+      if (subPath) {
+        await this.muxWithVideoFilter({
+          videoPath: options.videoPath,
+          audioPath: options.audioPath,
+          outputPath: options.outputPath,
+          profile: options.profile,
+          videoFilter: `subtitles='${escapeFilterPath(subPath)}'`,
+          durationSeconds: duration,
+          signal: options.signal,
+        });
+        return options.outputPath;
+      }
+    }
+
+    // Fallback for FFmpeg builds without libass: burn PNG caption overlays (visible on social).
+    if (
+      wantBurn &&
+      options.subtitleCues?.length &&
+      options.subtitleStyle &&
+      options.workDir &&
+      (await this.hasFilter('overlay'))
+    ) {
+      const overlays = await prepareSubtitleOverlays({
+        cues: options.subtitleCues,
+        width: options.profile.width,
+        height: options.profile.height,
+        style: options.subtitleStyle,
+        workDir: options.workDir,
+      });
+      if (overlays.length > 0) {
+        const { inputArgs, filter, videoLabel } = await writeSubtitleOverlayInputs(
+          options.workDir,
+          overlays,
+        );
+        const args = [
           '-y',
           '-i',
           options.videoPath,
+          ...inputArgs,
           '-i',
           options.audioPath,
-          '-vf',
-          `ass='${escaped}'`,
+          '-filter_complex',
+          filter,
+          '-map',
+          `[${videoLabel}]`,
+          '-map',
+          `${1 + overlays.length}:a:0`,
           '-c:v',
           options.profile.videoCodec,
           '-preset',
@@ -666,22 +738,24 @@ export class FfmpegService {
           String(options.profile.audioSampleRate),
           '-ac',
           String(options.profile.audioChannels),
-          '-shortest',
           '-movflags',
           '+faststart',
-          options.outputPath,
-        ],
-        timeoutMs: FFMPEG_DEFAULT_TIMEOUT_MS,
-        signal: options.signal,
-      });
-      return options.outputPath;
+        ];
+        if (duration && duration > 0) {
+          args.push('-t', duration.toFixed(3));
+        }
+        args.push(options.outputPath);
+        await this.run({
+          args,
+          timeoutMs: FFMPEG_DEFAULT_TIMEOUT_MS,
+          signal: options.signal,
+        });
+        return options.outputPath;
+      }
     }
 
-    // Soft-mux SRT as mov_text when hard burn-in (libass) is unavailable.
-    // Do not use -shortest here: SRT demuxer duration can truncate the A/V output.
-    if (options.srtSubtitlePath) {
-      const videoProbe = await this.probeMedia(options.videoPath, options.signal);
-      const duration = videoProbe.durationSeconds;
+    // Soft-mux only when burn-in was not requested. Soft tracks are invisible on most social apps.
+    if (!wantBurn && options.srtSubtitlePath) {
       const args = [
         '-y',
         '-i',
@@ -719,13 +793,23 @@ export class FfmpegService {
       return options.outputPath;
     }
 
-    await this.run({
-      args: [
+    if (wantBurn) {
+      throw new Error(
+        'Burned-in subtitles were requested but FFmpeg has no libass/subtitles filter and overlay burn-in failed. Install ffmpeg with libass or ensure subtitle cues are present.',
+      );
+    }
+
+    {
+      const args = [
         '-y',
         '-i',
         options.videoPath,
         '-i',
         options.audioPath,
+        '-map',
+        '0:v:0',
+        '-map',
+        '1:a:0',
         '-c:v',
         'copy',
         '-c:a',
@@ -734,15 +818,69 @@ export class FfmpegService {
         String(options.profile.audioSampleRate),
         '-ac',
         String(options.profile.audioChannels),
-        '-shortest',
         '-movflags',
         '+faststart',
-        options.outputPath,
-      ],
+      ];
+      if (duration && duration > 0) {
+        args.push('-t', duration.toFixed(3));
+      }
+      args.push(options.outputPath);
+      await this.run({
+        args,
+        timeoutMs: FFMPEG_DEFAULT_TIMEOUT_MS,
+        signal: options.signal,
+      });
+    }
+    return options.outputPath;
+  }
+
+  private async muxWithVideoFilter(options: {
+    videoPath: string;
+    audioPath: string;
+    outputPath: string;
+    profile: VideoOutputProfile;
+    videoFilter: string;
+    durationSeconds: number | null;
+    signal?: AbortSignal;
+  }): Promise<void> {
+    const args = [
+      '-y',
+      '-i',
+      options.videoPath,
+      '-i',
+      options.audioPath,
+      '-vf',
+      options.videoFilter,
+      '-map',
+      '0:v:0',
+      '-map',
+      '1:a:0',
+      '-c:v',
+      options.profile.videoCodec,
+      '-preset',
+      options.profile.qualityPreset,
+      '-crf',
+      String(options.profile.crf),
+      '-pix_fmt',
+      options.profile.pixelFormat,
+      '-c:a',
+      options.profile.audioCodec,
+      '-ar',
+      String(options.profile.audioSampleRate),
+      '-ac',
+      String(options.profile.audioChannels),
+      '-movflags',
+      '+faststart',
+    ];
+    if (options.durationSeconds && options.durationSeconds > 0) {
+      args.push('-t', options.durationSeconds.toFixed(3));
+    }
+    args.push(options.outputPath);
+    await this.run({
+      args,
       timeoutMs: FFMPEG_DEFAULT_TIMEOUT_MS,
       signal: options.signal,
     });
-    return options.outputPath;
   }
 
   async validateOutput(filePath: string, signal?: AbortSignal): Promise<ProbeMediaResult> {

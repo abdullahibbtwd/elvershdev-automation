@@ -14,10 +14,14 @@ import { config as loadEnv } from 'dotenv';
 import { createCipheriv, createHash, randomBytes } from 'node:crypto';
 import { resolve } from 'node:path';
 import axios from 'axios';
-import { SocialPlatform } from '@prisma/client';
+import { Prisma, SocialPlatform } from '@prisma/client';
 import { DEFAULT_CAPABILITIES } from '@ai-video/shared';
 import { INSTAGRAM_SCOPES, META_PAGE_SCOPES } from '../src/integrations/social/social-publishing.types';
 import { createPrismaClient } from '../src/prisma/create-prisma-client';
+
+function asJson(value: unknown): Prisma.InputJsonValue {
+  return value as Prisma.InputJsonValue;
+}
 
 loadEnv({ path: resolve(__dirname, '../../../.env') });
 loadEnv({ path: resolve(__dirname, '../.env'), override: true });
@@ -85,10 +89,10 @@ async function main() {
       accountType: 'page',
       connectionStatus: 'CONNECTED',
       grantedScopes: [...META_PAGE_SCOPES],
-      publishingCapabilities: DEFAULT_CAPABILITIES.FACEBOOK,
+      publishingCapabilities: asJson(DEFAULT_CAPABILITIES.FACEBOOK),
       accessTokenEncrypted: encrypt(pageToken, encKey),
       tokenExpiresAt: null,
-      metadata: { pageAccessToken: true, source: 'env-bootstrap' },
+      metadata: asJson({ pageAccessToken: true, source: 'env-bootstrap' }),
       isActive: true,
       lastConnectionCheckAt: new Date(),
     },
@@ -97,10 +101,10 @@ async function main() {
       accountType: 'page',
       connectionStatus: 'CONNECTED',
       grantedScopes: [...META_PAGE_SCOPES],
-      publishingCapabilities: DEFAULT_CAPABILITIES.FACEBOOK,
+      publishingCapabilities: asJson(DEFAULT_CAPABILITIES.FACEBOOK),
       accessTokenEncrypted: encrypt(pageToken, encKey),
       tokenExpiresAt: null,
-      metadata: { pageAccessToken: true, source: 'env-bootstrap' },
+      metadata: asJson({ pageAccessToken: true, source: 'env-bootstrap' }),
       isActive: true,
       lastConnectionCheckAt: new Date(),
       lastError: null,
@@ -139,10 +143,14 @@ async function main() {
       accountType: 'BUSINESS',
       connectionStatus: 'CONNECTED',
       grantedScopes: [...INSTAGRAM_SCOPES],
-      publishingCapabilities: DEFAULT_CAPABILITIES.INSTAGRAM,
+      publishingCapabilities: asJson(DEFAULT_CAPABILITIES.INSTAGRAM),
       accessTokenEncrypted: encrypt(pageToken, encKey),
       tokenExpiresAt: null,
-      metadata: { pageAccessToken: true, source: 'env-bootstrap', facebookPageId: pageId },
+      metadata: asJson({
+        pageAccessToken: true,
+        source: 'env-bootstrap',
+        facebookPageId: pageId,
+      }),
       isActive: true,
       lastConnectionCheckAt: new Date(),
     },
@@ -152,10 +160,14 @@ async function main() {
       accountType: 'BUSINESS',
       connectionStatus: 'CONNECTED',
       grantedScopes: [...INSTAGRAM_SCOPES],
-      publishingCapabilities: DEFAULT_CAPABILITIES.INSTAGRAM,
+      publishingCapabilities: asJson(DEFAULT_CAPABILITIES.INSTAGRAM),
       accessTokenEncrypted: encrypt(pageToken, encKey),
       tokenExpiresAt: null,
-      metadata: { pageAccessToken: true, source: 'env-bootstrap', facebookPageId: pageId },
+      metadata: asJson({
+        pageAccessToken: true,
+        source: 'env-bootstrap',
+        facebookPageId: pageId,
+      }),
       isActive: true,
       lastConnectionCheckAt: new Date(),
       lastError: null,

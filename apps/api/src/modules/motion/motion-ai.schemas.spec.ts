@@ -1,7 +1,9 @@
 import {
   createMockMotionAnalysis,
   createMockMp4Buffer,
+  estimateHailuoVideoCostUsd,
   estimateKlingVideoCostUsd,
+  getHailuoModelCapabilities,
   getKlingModelCapabilities,
   motionAnalysisBatchSchema,
   motionBriefSchema,
@@ -61,6 +63,16 @@ describe('Phase 6 motion-ai schemas and pricing', () => {
 
     expect(
       generateStoryMotionSchema.parse({
+        provider: 'hailuo',
+        durationSeconds: 6,
+        resolution: '768P',
+        sceneIds: ['11111111-1111-4111-8111-111111111111'],
+      }).durationSeconds,
+    ).toBe(6);
+
+    expect(
+      generateStoryMotionSchema.parse({
+        provider: 'kling',
         durationSeconds: 5,
         resolution: '720p',
         sceneIds: ['11111111-1111-4111-8111-111111111111'],
@@ -125,12 +137,28 @@ describe('Phase 6 motion-ai schemas and pricing', () => {
     expect(cost).toBe(0.5);
   });
 
+  it('estimates Hailuo cost from configurable pricing', () => {
+    const cost = estimateHailuoVideoCostUsd(6, '768P', {
+      pricePerSecond768PUsd: 0.045,
+      pricePerSecond512PUsd: 0.017,
+      currency: 'USD',
+    });
+    expect(cost).toBeCloseTo(0.27, 5);
+  });
+
   it('exposes Kling 2.6 capabilities from official model path', () => {
     const caps = getKlingModelCapabilities('kling-2.6');
     expect(caps.submitPath).toBe('/image-to-video/kling-2.6');
     expect(caps.supportedDurations).toEqual([5, 10]);
     expect(caps.supportedResolutions).toEqual(['720p', '1080p']);
     expect(caps.cancelSupported).toBe(false);
+  });
+
+  it('exposes Hailuo-02 Standard capabilities', () => {
+    const caps = getHailuoModelCapabilities();
+    expect(caps.endpointId).toBe('fal-ai/minimax/hailuo-02/standard/image-to-video');
+    expect(caps.supportedDurations).toEqual([6, 10]);
+    expect(caps.supportedResolutions).toEqual(['512P', '768P']);
   });
 
   it('returns a valid mock MP4 buffer with ftyp signature', () => {

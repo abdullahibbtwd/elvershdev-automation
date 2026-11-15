@@ -121,6 +121,13 @@ describe('MotionService', () => {
     const config = {
       get: jest.fn((key: string, fallback?: unknown) => {
         const map: Record<string, unknown> = {
+          'integrations.hailuoModel': 'fal-ai/minimax/hailuo-02/standard/image-to-video',
+          'integrations.hailuoCurrency': 'USD',
+          'integrations.hailuoDefaultDuration': 6,
+          'integrations.hailuoDefaultResolution': '768P',
+          'integrations.hailuoUseMock': 'true',
+          'integrations.hailuoPricePerSecond768PUsd': '0.045',
+          'integrations.hailuoPricePerSecond512PUsd': '0.017',
           'integrations.klingModel': 'kling-2.6',
           'integrations.klingCurrency': 'USD',
           'integrations.klingDefaultDurationSeconds': 5,
@@ -134,22 +141,44 @@ describe('MotionService', () => {
       }),
     };
 
+    const videoProviders = {
+      getDefaultProviderId: jest.fn().mockReturnValue('hailuo'),
+      resolveId: jest.fn((value?: string | null) =>
+        value === 'kling' ? 'kling' : 'hailuo',
+      ),
+      assertSelectable: jest.fn(),
+      validateSettings: jest.fn(),
+      estimateCost: jest.fn().mockReturnValue(0.27),
+      getModel: jest.fn((provider: string) =>
+        provider === 'kling'
+          ? 'kling-2.6'
+          : 'fal-ai/minimax/hailuo-02/standard/image-to-video',
+      ),
+      getDefaultDuration: jest.fn((provider: string) => (provider === 'kling' ? 5 : 6)),
+      getDefaultResolution: jest.fn((provider: string) =>
+        provider === 'kling' ? '720p' : '768P',
+      ),
+      listAvailability: jest.fn().mockReturnValue([]),
+      resolve: jest.fn().mockReturnValue({ shouldUseMock: () => true }),
+    };
+
     const service = new MotionService(
       prisma as never,
       queueService as never,
       storage as never,
       jobsService as never,
       config as never,
+      videoProviders as never,
     );
 
-    return { service, prisma, queueService };
+    return { service, prisma, queueService, videoProviders };
   }
 
   it('enqueues story motion generation when scenes have images', async () => {
     const { service, queueService, prisma } = createService();
     const result = await service.generateForStory(userId, storyId, {
-      durationSeconds: 5,
-      resolution: '720p',
+      durationSeconds: 6,
+      resolution: '768P',
     });
 
     expect(prisma.motionGeneration.create).toHaveBeenCalled();

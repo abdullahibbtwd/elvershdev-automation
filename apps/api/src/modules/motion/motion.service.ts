@@ -13,11 +13,11 @@ import {
   VisualGenerationStatus,
 } from '@prisma/client';
 import {
-  estimateKlingVideoCostUsd,
-  getKlingPricingFromEnv,
   JOB_TYPE_TO_QUEUE,
   type MotionJobAction,
+  type VideoProviderId,
 } from '@ai-video/shared';
+import { VideoProviderRegistry } from '../../integrations/video/video-provider.registry';
 import { PrismaService } from '../../prisma/prisma.service';
 import { QueueService } from '../../queue/queue.service';
 import { StorageService } from '../../storage/storage.service';
@@ -54,7 +54,12 @@ export class MotionService {
     private readonly storage: StorageService,
     private readonly jobsService: JobsService,
     private readonly config: ConfigService,
+    private readonly videoProviders: VideoProviderRegistry,
   ) {}
+
+  listVideoProviders() {
+    return this.videoProviders.listAvailability();
+  }
 
   async generateForStory(userId: string, storyId: string, dto: GenerateStoryMotionDto) {
     const story = await this.prisma.story.findFirst({
@@ -103,15 +108,21 @@ export class MotionService {
       );
     }
 
+    const providerId = this.resolveRequestedProvider(dto.provider);
+    const durationSeconds = dto.durationSeconds ?? this.defaultDuration(providerId);
+    const resolution = dto.resolution ?? this.defaultResolution(providerId);
+    this.validateProviderSettings(providerId, durationSeconds, resolution);
+
     await this.assertNoActiveStoryMotionJobs(
       storyId,
       targetScenes.map((scene) => scene.id),
     );
     await this.assertBudgetAllows(
       userId,
+      providerId,
       targetScenes.length,
-      dto.durationSeconds ?? this.defaultDuration(),
-      dto.resolution ?? this.defaultResolution(),
+      durationSeconds,
+      resolution,
     );
 
     const createdMotions = [];
@@ -130,12 +141,10 @@ export class MotionService {
         select: { attemptNumber: true },
       });
 
-      const durationSeconds = dto.durationSeconds ?? this.defaultDuration();
-      const resolution = dto.resolution ?? this.defaultResolution();
-      const estimatedCost = estimateKlingVideoCostUsd(
+      const estimatedCost = this.videoProviders.estimateCost(
+        providerId,
         durationSeconds,
         resolution,
-        getKlingPricingFromEnv(),
       );
 
       const motion = await this.prisma.motionGeneration.create({
@@ -145,8 +154,8 @@ export class MotionService {
           sceneId: scene.id,
           sourceVisualId: sourceVisual.id,
           sourceMediaAssetId: sourceVisual.generatedImageMediaId,
-          provider: 'kling',
-          providerModel: this.config.get<string>('integrations.klingModel', 'kling-2.6'),
+          provider: providerId,
+          providerModel: this.videoProviders.getModel(providerId),
           motionPrompt: dto.motionPrompt?.trim() || scene.videoPrompt || 'Natural cinematic motion',
           negativePrompt: dto.negativePrompt,
           status: MotionGenerationStatus.PENDING,
@@ -154,11 +163,12 @@ export class MotionService {
           durationSeconds,
           resolution,
           estimatedCost: new Prisma.Decimal(estimatedCost),
-          currency: this.config.get<string>('integrations.klingCurrency', 'USD'),
+          currency: this.providerCurrency(providerId),
           attemptNumber: (latest?.attemptNumber ?? 0) + 1,
           generationParameters: {
             durationSeconds,
             resolution,
+            provider: providerId,
             skipAnalysis: dto.skipAnalysis === true,
           },
         },
@@ -211,7 +221,7 @@ export class MotionService {
           provider: 'gemini',
           payload,
           simulateFailure: dto.simulateFailure === true,
-          useMockAi: this.shouldUseMockAi(),
+          useMockAi: this.shouldUseMockAi(providerId),
         },
         { attempts: dto.simulateFailure ? 1 : 3 },
       );
@@ -259,14 +269,14 @@ export class MotionService {
     const scene = await this.ensureSceneOwned(userId, sceneId);
     const sourceVisual = await this.resolveSourceVisual(scene.id, dto.sourceVisualId);
 
+    const providerId = this.resolveRequestedProvider(dto.provider);
+    const durationSeconds = dto.durationSeconds ?? this.defaultDuration(providerId);
+    const resolution = dto.resolution ?? this.defaultResolution(providerId);
+    this.validateProviderSettings(providerId, durationSeconds, resolution);
+
     await this.assertNoActiveSceneMotionJobs(scene.id);
     await this.assertSceneAttemptLimits(scene.id);
-    await this.assertBudgetAllows(
-      userId,
-      1,
-      dto.durationSeconds ?? this.defaultDuration(),
-      dto.resolution ?? this.defaultResolution(),
-    );
+    await this.assertBudgetAllows(userId, providerId, 1, durationSeconds, resolution);
 
     const latest = await this.prisma.motionGeneration.findFirst({
       where: { sceneId: scene.id },
@@ -274,12 +284,10 @@ export class MotionService {
       select: { attemptNumber: true },
     });
 
-    const durationSeconds = dto.durationSeconds ?? this.defaultDuration();
-    const resolution = dto.resolution ?? this.defaultResolution();
-    const estimatedCost = estimateKlingVideoCostUsd(
+    const estimatedCost = this.videoProviders.estimateCost(
+      providerId,
       durationSeconds,
       resolution,
-      getKlingPricingFromEnv(),
     );
 
     const motion = await this.prisma.motionGeneration.create({
@@ -289,8 +297,8 @@ export class MotionService {
         sceneId: scene.id,
         sourceVisualId: sourceVisual.id,
         sourceMediaAssetId: sourceVisual.generatedImageMediaId!,
-        provider: 'kling',
-        providerModel: this.config.get<string>('integrations.klingModel', 'kling-2.6'),
+        provider: providerId,
+        providerModel: this.videoProviders.getModel(providerId),
         motionPrompt:
           dto.motionPrompt?.trim() || scene.videoPrompt || 'Natural cinematic motion',
         negativePrompt: dto.negativePrompt,
@@ -299,11 +307,12 @@ export class MotionService {
         durationSeconds,
         resolution,
         estimatedCost: new Prisma.Decimal(estimatedCost),
-        currency: this.config.get<string>('integrations.klingCurrency', 'USD'),
+        currency: this.providerCurrency(providerId),
         attemptNumber: (latest?.attemptNumber ?? 0) + 1,
         generationParameters: {
           durationSeconds,
           resolution,
+          provider: providerId,
           regenerate: options?.regenerate === true,
           skipAnalysis: dto.skipAnalysis === true || Boolean(dto.motionPrompt),
         },
@@ -357,7 +366,7 @@ export class MotionService {
           provider: 'gemini',
           payload,
           simulateFailure: dto.simulateFailure === true,
-          useMockAi: this.shouldUseMockAi(),
+          useMockAi: this.shouldUseMockAi(providerId),
         },
         { attempts: dto.simulateFailure ? 1 : 3 },
       );
@@ -651,10 +660,11 @@ export class MotionService {
       throw new ConflictException('Only failed or cancelled motion generations can be retried');
     }
 
-    // Retry by creating a fresh attempt from the same source visual.
+    // Retry by creating a fresh attempt from the same source visual / provider.
     return this.generateForScene(userId, motion.sceneId, {
-      durationSeconds: motion.durationSeconds as 5 | 10,
-      resolution: motion.resolution as '720p' | '1080p',
+      provider: (motion.provider as VideoProviderId | undefined) || undefined,
+      durationSeconds: motion.durationSeconds as 5 | 6 | 10,
+      resolution: motion.resolution as '720p' | '1080p' | '512P' | '768P',
       motionPrompt: motion.motionPrompt,
       negativePrompt: motion.negativePrompt ?? undefined,
       sourceVisualId: motion.sourceVisualId,
@@ -809,13 +819,46 @@ export class MotionService {
     }
   }
 
+  private resolveRequestedProvider(requested?: string): VideoProviderId {
+    const providerId = this.videoProviders.resolveId(requested);
+    try {
+      this.videoProviders.assertSelectable(providerId);
+    } catch (error) {
+      throw new BadRequestException((error as Error).message);
+    }
+    return providerId;
+  }
+
+  private validateProviderSettings(
+    providerId: VideoProviderId,
+    durationSeconds: number,
+    resolution: string,
+  ): void {
+    try {
+      this.videoProviders.validateSettings(providerId, durationSeconds, resolution);
+    } catch (error) {
+      throw new BadRequestException((error as Error).message);
+    }
+  }
+
+  private providerCurrency(providerId: VideoProviderId): string {
+    if (providerId === 'hailuo') {
+      return this.config.get<string>('integrations.hailuoCurrency', 'USD');
+    }
+    return this.config.get<string>('integrations.klingCurrency', 'USD');
+  }
+
   private async assertBudgetAllows(
     userId: string,
+    providerId: VideoProviderId,
     clipCount: number,
     durationSeconds: number,
     resolution: string,
   ) {
-    const maxMonthly = this.config.get<string>('integrations.klingMaxMonthlySpendUsd');
+    const maxMonthly =
+      providerId === 'hailuo'
+        ? this.config.get<string>('integrations.hailuoMaxMonthlySpendUsd')
+        : this.config.get<string>('integrations.klingMaxMonthlySpendUsd');
     if (!maxMonthly) return;
 
     const limit = Number.parseFloat(maxMonthly);
@@ -828,38 +871,40 @@ export class MotionService {
     const usages = await this.prisma.providerUsage.findMany({
       where: {
         userId,
-        provider: 'kling',
+        provider: providerId,
         createdAt: { gte: startOfMonth },
       },
       select: { estimatedCost: true },
     });
     const spent = usages.reduce((sum, row) => sum + Number(row.estimatedCost), 0);
-    const upcoming = estimateKlingVideoCostUsd(durationSeconds, resolution) * clipCount;
+    const upcoming =
+      this.videoProviders.estimateCost(providerId, durationSeconds, resolution) * clipCount;
     if (spent + upcoming > limit) {
       throw new BadRequestException(
-        `Monthly Kling motion budget of $${limit} would be exceeded (spent $${spent.toFixed(4)}, requested ~$${upcoming.toFixed(4)})`,
+        `Monthly ${providerId} motion budget of $${limit} would be exceeded (spent $${spent.toFixed(4)}, requested ~$${upcoming.toFixed(4)})`,
       );
     }
   }
 
-  private defaultDuration(): 5 | 10 {
-    const value = this.config.get<number>('integrations.klingDefaultDurationSeconds', 5);
-    return value === 10 ? 10 : 5;
+  private defaultDuration(providerId: VideoProviderId = this.videoProviders.getDefaultProviderId()): number {
+    return this.videoProviders.getDefaultDuration(providerId);
   }
 
-  private defaultResolution(): '720p' | '1080p' {
-    const value = this.config.get<string>('integrations.klingDefaultResolution', '720p');
-    return value === '1080p' ? '1080p' : '720p';
+  private defaultResolution(
+    providerId: VideoProviderId = this.videoProviders.getDefaultProviderId(),
+  ): string {
+    return this.videoProviders.getDefaultResolution(providerId);
   }
 
-  private shouldUseMockAi(): boolean {
-    return (
-      process.env.NODE_ENV === 'test' ||
-      this.config.get<string>('integrations.klingUseMock') === 'true' ||
-      this.config.get<string>('integrations.geminiUseMock') === 'true' ||
-      process.env.KLING_USE_MOCK === 'true' ||
-      process.env.GEMINI_USE_MOCK === 'true'
+  private shouldUseMockAi(providerOverride?: string | null): boolean {
+    // Only the active motion provider's mock flag matters. A disabled Kling
+    // with KLING_USE_MOCK=true must not force Hailuo into placeholder clips.
+    // Gemini mock is handled in the analysis processor separately from video.
+    if (process.env.NODE_ENV === 'test') return true;
+    const providerId = this.videoProviders.resolveId(
+      providerOverride ?? this.videoProviders.getDefaultProviderId(),
     );
+    return this.videoProviders.resolve(providerId).shouldUseMock();
   }
 
   private serializeJob(job: {

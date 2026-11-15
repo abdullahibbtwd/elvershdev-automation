@@ -222,15 +222,20 @@ export function AutomationSettingsPage() {
       </Section>
 
       <Section title="Publishing schedule">
+        <p className="sm:col-span-2 text-sm text-muted-foreground">
+          Daily slots are fixed: Slot 0 publishes at <strong>08:00</strong> (morning motivation),
+          Slot 1 at <strong>19:00</strong> (evening emotional) in your timezone. Set daily target to
+          2 for that cadence.
+        </p>
         <Field label="Timezone">{input('timezone', { placeholder: 'America/New_York' })}</Field>
         <Field label="Min interval (minutes)">
           {input('minIntervalMinutes', { type: 'number', min: 5 })}
         </Field>
         <Field label="Window start (HH:mm)">
-          {input('publishingWindowStart', { placeholder: '09:00' })}
+          {input('publishingWindowStart', { placeholder: '08:00' })}
         </Field>
         <Field label="Window end (HH:mm)">
-          {input('publishingWindowEnd', { placeholder: '21:00' })}
+          {input('publishingWindowEnd', { placeholder: '19:30' })}
         </Field>
         <Field label="Max daily publishing attempts">
           {input('maxDailyPublishingAttempts', { type: 'number', min: 1, max: 200 })}

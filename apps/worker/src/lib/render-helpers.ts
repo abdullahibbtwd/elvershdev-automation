@@ -127,13 +127,22 @@ export async function buildTimelineFromStory(
       scene.visuals.find(
         (v) => v.generationStatus === VisualGenerationStatus.COMPLETED && v.generatedImageMedia,
       );
+    const isUsableMotionClip = (m: (typeof scene.motionGenerations)[number]) => {
+      if (m.status !== MotionGenerationStatus.COMPLETED || !m.outputMediaAsset) return false;
+      // Tiny mock stubs (~3KB gray frames) must not enter the final cut.
+      const fileSize = Number(m.outputMediaAsset.fileSize ?? 0);
+      if (fileSize > 0 && fileSize < 50_000) return false;
+      if (
+        typeof m.providerModel === 'string' &&
+        (m.providerModel.startsWith('mock:') || m.providerModel.includes('mock-'))
+      ) {
+        return false;
+      }
+      return true;
+    };
     const selectedMotion =
-      scene.motionGenerations.find(
-        (m) => m.isSelected && m.status === MotionGenerationStatus.COMPLETED && m.outputMediaAsset,
-      ) ??
-      scene.motionGenerations.find(
-        (m) => m.status === MotionGenerationStatus.COMPLETED && m.outputMediaAsset,
-      );
+      scene.motionGenerations.find((m) => m.isSelected && isUsableMotionClip(m)) ??
+      scene.motionGenerations.find((m) => isUsableMotionClip(m));
     const selectedAudio = scene.audioGenerations.find(
       (a) => a.isSelected && a.status === AudioGenerationStatus.COMPLETED && a.audioMediaAsset,
     );

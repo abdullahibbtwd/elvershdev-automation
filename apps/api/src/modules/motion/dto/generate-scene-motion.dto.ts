@@ -11,16 +11,24 @@ import {
 } from 'class-validator';
 
 export class GenerateSceneMotionDto {
-  @ApiPropertyOptional({ enum: [5, 10] })
+  @ApiPropertyOptional({
+    enum: ['hailuo', 'kling'],
+    description: 'Video generation provider (default: VIDEO_GENERATION_PROVIDER / hailuo)',
+  })
+  @IsOptional()
+  @IsIn(['hailuo', 'kling'])
+  provider?: 'hailuo' | 'kling';
+
+  @ApiPropertyOptional({ enum: [5, 6, 10] })
   @IsOptional()
   @IsInt()
-  @IsIn([5, 10])
-  durationSeconds?: 5 | 10;
+  @IsIn([5, 6, 10])
+  durationSeconds?: 5 | 6 | 10;
 
-  @ApiPropertyOptional({ enum: ['720p', '1080p'] })
+  @ApiPropertyOptional({ enum: ['720p', '1080p', '512P', '768P'] })
   @IsOptional()
-  @IsIn(['720p', '1080p'])
-  resolution?: '720p' | '1080p';
+  @IsIn(['720p', '1080p', '512P', '768P'])
+  resolution?: '720p' | '1080p' | '512P' | '768P';
 
   @ApiPropertyOptional()
   @IsOptional()

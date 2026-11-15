@@ -8,7 +8,10 @@ import {
   STORY_TONES,
 } from '@ai-video/shared';
 import { Button } from '@/components/ui/button';
+import { ChoiceGroup } from '@/components/ui/choice-group';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Select } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { api } from '@/lib/api';
 
@@ -92,74 +95,45 @@ export function StoryCreatePage() {
 
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="space-y-1.5">
-            <label className="text-sm font-medium">Niche</label>
-            <select
-              className="h-10 w-full rounded-md border px-3 text-sm"
+            <Label>Niche</Label>
+            <Select
               value={niche}
               onChange={(e) => setNiche(e.target.value)}
-            >
-              {STORY_NICHES.map((n) => (
-                <option key={n} value={n}>
-                  {n}
-                </option>
-              ))}
-            </select>
+              options={STORY_NICHES.map((n) => ({ value: n, label: n }))}
+            />
           </div>
           <div className="space-y-1.5">
-            <label className="text-sm font-medium">Tone</label>
-            <select
-              className="h-10 w-full rounded-md border px-3 text-sm"
+            <Label>Tone</Label>
+            <Select
               value={tone}
               onChange={(e) => setTone(e.target.value)}
-            >
-              {STORY_TONES.map((t) => (
-                <option key={t} value={t}>
-                  {t}
-                </option>
-              ))}
-            </select>
+              options={STORY_TONES.map((t) => ({ value: t, label: t }))}
+            />
           </div>
           <div className="space-y-1.5">
-            <label className="text-sm font-medium">Language</label>
-            <select
-              className="h-10 w-full rounded-md border px-3 text-sm"
+            <Label>Language</Label>
+            <Select
               value={language}
               onChange={(e) => setLanguage(e.target.value)}
-            >
-              {LANGUAGES.map((l) => (
-                <option key={l.value} value={l.value}>
-                  {l.label}
-                </option>
-              ))}
-            </select>
+              options={LANGUAGES}
+            />
           </div>
           <div className="space-y-1.5">
-            <label className="text-sm font-medium">Duration</label>
-            <select
-              className="h-10 w-full rounded-md border px-3 text-sm"
-              value={duration}
-              onChange={(e) => setDuration(Number(e.target.value))}
-            >
-              {DURATIONS.map((d) => (
-                <option key={d} value={d}>
-                  {d} seconds
-                </option>
-              ))}
-            </select>
+            <Label>Duration</Label>
+            <ChoiceGroup
+              value={String(duration)}
+              onChange={(next) => setDuration(Number(next))}
+              options={DURATIONS.map((d) => ({ value: String(d), label: `${d}s` }))}
+              size="sm"
+            />
           </div>
           <div className="space-y-1.5 sm:col-span-2">
-            <label className="text-sm font-medium">Category</label>
-            <select
-              className="h-10 w-full rounded-md border px-3 text-sm"
+            <Label>Category</Label>
+            <Select
               value={category}
               onChange={(e) => setCategory(e.target.value)}
-            >
-              {STORY_CATEGORIES.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
-            </select>
+              options={STORY_CATEGORIES.map((c) => ({ value: c, label: c }))}
+            />
           </div>
         </div>
 

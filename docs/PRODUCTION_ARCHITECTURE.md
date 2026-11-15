@@ -39,7 +39,8 @@ All provider calls go out from the API (planning, some cost/usage code) or the *
 | Google Gemini | Story and scene planning, motion briefs, narration planning | `GEMINI_*` | `GEMINI_USE_MOCK` (also automatic when `GEMINI_API_KEY` is unset or `NODE_ENV=test`) |
 | Gemini TTS | Narration audio | `GEMINI_TTS_*` | `GEMINI_TTS_USE_MOCK` |
 | fal.ai | Scene images and character references | `FAL_*` | `FAL_USE_MOCK` |
-| Kling | Image-to-video clips | `KLING_*` | `KLING_USE_MOCK` |
+| Hailuo-02 (fal.ai, default) | Image-to-video clips | `VIDEO_GENERATION_PROVIDER`, `HAILUO_*`, `FAL_API_KEY` | `HAILUO_USE_MOCK` |
+| Kling (optional / future) | Image-to-video clips | `KLING_ENABLED`, `KLING_*` | `KLING_USE_MOCK` |
 | Meta (Facebook / Instagram) | OAuth and publishing | `FACEBOOK_*`, `INSTAGRAM_*` | `FACEBOOK_USE_MOCK`, `INSTAGRAM_USE_MOCK`, `SOCIAL_USE_MOCK` |
 | TikTok | OAuth and publishing | `TIKTOK_*` | `TIKTOK_USE_MOCK` (`TIKTOK_AUDITED` gates public posting) |
 | YouTube | OAuth and publishing | `YOUTUBE_*` | `YOUTUBE_USE_MOCK` |

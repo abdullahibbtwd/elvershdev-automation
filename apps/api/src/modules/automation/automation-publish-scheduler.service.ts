@@ -12,6 +12,7 @@ import {
   DEFAULT_CAPABILITIES,
   QUEUE_NAMES,
   addMinutes,
+  buildViralHashtags,
   formatDateInTimeZone,
   zonedDateTimeToUtc,
   type AutomationPublishSchedulerPayload,
@@ -353,6 +354,35 @@ export class AutomationPublishSchedulerService {
     const story = item.contentSchedule.storyId
       ? await this.prisma.story.findUnique({ where: { id: item.contentSchedule.storyId } })
       : null;
+    const plan = item.contentSchedule.contentPlanId
+      ? await this.prisma.contentPlan.findUnique({
+          where: { id: item.contentSchedule.contentPlanId },
+          select: { category: true, theme: true, metadata: true },
+        })
+      : null;
+    const planMeta =
+      plan?.metadata && typeof plan.metadata === 'object' && !Array.isArray(plan.metadata)
+        ? (plan.metadata as Record<string, unknown>)
+        : {};
+    const slotKind =
+      planMeta.slotKind === 'morning' || planMeta.slotKind === 'evening'
+        ? planMeta.slotKind
+        : null;
+
+    const hashtags = buildViralHashtags({
+      platform: channel.platform,
+      seedTags: story?.hashtags ?? [],
+      category: plan?.category,
+      theme: plan?.theme,
+      title: story?.title,
+      slotKind,
+    });
+    // Caption body without tags — worker buildCaption appends hashtags once.
+    const caption =
+      story?.description?.trim() ||
+      story?.openingHook?.trim() ||
+      story?.title?.trim() ||
+      'A short story worth watching.';
 
     try {
       const publications = await this.publishingService.publishRender(item.userId, renderId, {
@@ -360,9 +390,9 @@ export class AutomationPublishSchedulerService {
           {
             channelId: channel.id,
             title: story?.title,
-            caption: story?.description ?? story?.openingHook ?? story?.title,
-            description: story?.description ?? undefined,
-            hashtags: story?.hashtags ?? [],
+            caption,
+            description: caption,
+            hashtags,
           },
         ],
         idempotencyKey: item.idempotencyKey,

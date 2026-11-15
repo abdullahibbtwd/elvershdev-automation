@@ -9,10 +9,18 @@ import {
   createMockStoryResult,
   createMockVisualAnalysis,
   estimateGeminiCostUsd,
+  generatedScenePlanJsonSchema,
   generatedScenePlanSchema,
+  generatedStoryJsonSchema,
   generatedStorySchema,
   getGeminiPricingFromEnv,
+  motionAnalysisBatchJsonSchema,
   motionAnalysisBatchSchema,
+  normalizeGeneratedScenePlanInput,
+  normalizeGeneratedStoryInput,
+  normalizeMotionAnalysisBatchInput,
+  normalizeVisualAnalysisBatchInput,
+  visualAnalysisBatchJsonSchema,
   visualAnalysisBatchSchema,
   type GeneratedScenePlan,
   type GeneratedStory,
@@ -49,7 +57,7 @@ function shouldUseMock(forceMock?: boolean): boolean {
 }
 
 function getModel(): string {
-  return process.env.GEMINI_MODEL ?? 'gemini-2.0-flash';
+  return process.env.GEMINI_MODEL ?? 'gemini-3.8-flash';
 }
 
 function getTimeoutMs(): number {
@@ -64,6 +72,10 @@ async function generateJson<T>(
   _requestType: string,
   prompt: string,
   schema: ParseableSchema<T>,
+  options?: {
+    responseJsonSchema?: Record<string, unknown>;
+    normalize?: (raw: unknown) => unknown;
+  },
 ): Promise<GeminiJsonResult<T>> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
@@ -86,6 +98,9 @@ async function generateJson<T>(
           config: {
             responseMimeType: 'application/json',
             temperature: 0.7,
+            ...(options?.responseJsonSchema
+              ? { responseJsonSchema: options.responseJsonSchema }
+              : {}),
           },
         }),
         new Promise<never>((_, reject) => {
@@ -104,7 +119,8 @@ async function generateJson<T>(
         throw new Error('Gemini returned invalid JSON');
       }
 
-      const data = schema.parse(parsed);
+      const normalized = options?.normalize ? options.normalize(parsed) : parsed;
+      const data = schema.parse(normalized);
       const inputTokens = response.usageMetadata?.promptTokenCount ?? 0;
       const outputTokens = response.usageMetadata?.candidatesTokenCount ?? 0;
 
@@ -158,7 +174,15 @@ export async function generateStoryContent(
     };
   }
 
-  return generateJson('story_generation', buildStoryGenerationPrompt(brief), generatedStorySchema);
+  return generateJson(
+    'story_generation',
+    buildStoryGenerationPrompt(brief),
+    generatedStorySchema,
+    {
+      responseJsonSchema: generatedStoryJsonSchema as unknown as Record<string, unknown>,
+      normalize: normalizeGeneratedStoryInput,
+    },
+  );
 }
 
 export async function planScenes(
@@ -183,6 +207,10 @@ export async function planScenes(
     'scene_planning',
     buildScenePlanningPrompt(input),
     generatedScenePlanSchema,
+    {
+      responseJsonSchema: generatedScenePlanJsonSchema as unknown as Record<string, unknown>,
+      normalize: normalizeGeneratedScenePlanInput,
+    },
   );
 
   const total = result.data.scenes.reduce((sum, scene) => sum + scene.durationSeconds, 0);
@@ -232,6 +260,10 @@ export async function analyzeVisuals(
     'visual_analysis',
     buildVisualAnalysisPrompt(input),
     visualAnalysisBatchSchema,
+    {
+      responseJsonSchema: visualAnalysisBatchJsonSchema as unknown as Record<string, unknown>,
+      normalize: normalizeVisualAnalysisBatchInput,
+    },
   );
 }
 
@@ -257,5 +289,9 @@ export async function analyzeMotion(
     'motion_analysis',
     buildMotionAnalysisPrompt(input),
     motionAnalysisBatchSchema,
+    {
+      responseJsonSchema: motionAnalysisBatchJsonSchema as unknown as Record<string, unknown>,
+      normalize: normalizeMotionAnalysisBatchInput,
+    },
   );
 }

@@ -13,6 +13,14 @@ import {
 } from 'class-validator';
 
 export class GenerateStoryMotionDto {
+  @ApiPropertyOptional({
+    enum: ['hailuo', 'kling'],
+    description: 'Video generation provider (default: VIDEO_GENERATION_PROVIDER / hailuo)',
+  })
+  @IsOptional()
+  @IsIn(['hailuo', 'kling'])
+  provider?: 'hailuo' | 'kling';
+
   @ApiPropertyOptional({ type: [String], description: 'Optional subset of scene IDs' })
   @IsOptional()
   @IsArray()
@@ -20,16 +28,22 @@ export class GenerateStoryMotionDto {
   @IsUUID(undefined, { each: true })
   sceneIds?: string[];
 
-  @ApiPropertyOptional({ enum: [5, 10], description: 'Kling clip duration in seconds' })
+  @ApiPropertyOptional({
+    enum: [5, 6, 10],
+    description: 'Clip duration in seconds (Hailuo: 6|10, Kling: 5|10)',
+  })
   @IsOptional()
   @IsInt()
-  @IsIn([5, 10])
-  durationSeconds?: 5 | 10;
+  @IsIn([5, 6, 10])
+  durationSeconds?: 5 | 6 | 10;
 
-  @ApiPropertyOptional({ enum: ['720p', '1080p'] })
+  @ApiPropertyOptional({
+    enum: ['720p', '1080p', '512P', '768P'],
+    description: 'Clip resolution (Hailuo: 512P|768P, Kling: 720p|1080p)',
+  })
   @IsOptional()
-  @IsIn(['720p', '1080p'])
-  resolution?: '720p' | '1080p';
+  @IsIn(['720p', '1080p', '512P', '768P'])
+  resolution?: '720p' | '1080p' | '512P' | '768P';
 
   @ApiPropertyOptional({ description: 'Optional shared motion prompt override' })
   @IsOptional()

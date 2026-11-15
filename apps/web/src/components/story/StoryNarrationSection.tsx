@@ -8,6 +8,7 @@ import { ErrorState } from '@/components/ErrorState';
 import { LoadingState } from '@/components/LoadingState';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Select } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { api } from '@/lib/api';
 import { statusTone } from '@/lib/status';
@@ -457,34 +458,37 @@ export function StoryNarrationSection({
           <label className="text-xs text-muted-foreground" htmlFor="narration-voice">
             Provider voice or saved profile
           </label>
-          <select
+          <Select
             id="narration-voice"
-            className="h-10 w-full rounded-md border bg-card px-3 text-sm"
             value={voiceChoice}
             onChange={(e) => setVoiceChoice(e.target.value)}
             disabled={voicesQuery.isLoading || profilesQuery.isLoading}
-          >
-            <option value="">Default voice</option>
-            {profiles.length > 0 && (
-              <optgroup label="Voice profiles">
-                {profiles.map((profile) => (
-                  <option key={profile.id} value={`profile:${profile.id}`}>
-                    {profile.name} ({profile.providerVoiceId}){profile.isDefault ? ' · default' : ''}
-                  </option>
-                ))}
-              </optgroup>
-            )}
-            {voices.length > 0 && (
-              <optgroup label="Provider voices">
-                {voices.map((voice) => (
-                  <option key={voice.id} value={`voice:${voice.id}`}>
-                    {voice.name}
-                    {voice.description ? ` — ${voice.description}` : ''}
-                  </option>
-                ))}
-              </optgroup>
-            )}
-          </select>
+            options={[{ value: '', label: 'Default voice' }]}
+            groups={[
+              ...(profiles.length
+                ? [
+                    {
+                      label: 'Voice profiles',
+                      options: profiles.map((profile) => ({
+                        value: `profile:${profile.id}`,
+                        label: `${profile.name} (${profile.providerVoiceId})${profile.isDefault ? ' · default' : ''}`,
+                      })),
+                    },
+                  ]
+                : []),
+              ...(voices.length
+                ? [
+                    {
+                      label: 'Provider voices',
+                      options: voices.map((voice) => ({
+                        value: `voice:${voice.id}`,
+                        label: `${voice.name}${voice.description ? ` — ${voice.description}` : ''}`,
+                      })),
+                    },
+                  ]
+                : []),
+            ]}
+          />
           {(voicesQuery.error || profilesQuery.error) && (
             <p className="text-xs text-rose-700">
               Could not load voices.{' '}
@@ -507,7 +511,7 @@ export function StoryNarrationSection({
           </label>
           <input
             id="narration-style"
-            className="h-10 w-full rounded-md border bg-card px-3 text-sm"
+            className="h-10 w-full rounded-md border border-input bg-card px-3 text-sm text-foreground"
             placeholder="e.g. warm, calm storyteller"
             maxLength={200}
             value={speakingStyle}
@@ -522,7 +526,7 @@ export function StoryNarrationSection({
           </label>
           <input
             id="narration-profile-name"
-            className="h-9 w-56 rounded-md border bg-card px-3 text-sm"
+            className="h-9 w-56 rounded-md border border-input bg-card px-3 text-sm text-foreground"
             placeholder="Profile name"
             maxLength={100}
             value={newProfileName}
@@ -772,7 +776,7 @@ export function StoryNarrationSection({
                       Speaking style
                     </div>
                     <input
-                      className="h-9 w-full rounded-md border bg-card px-3 text-sm"
+                      className="h-9 w-full rounded-md border border-input bg-card px-3 text-sm text-foreground"
                       value={styleValue}
                       disabled={!canEdit || sceneBusy}
                       maxLength={200}

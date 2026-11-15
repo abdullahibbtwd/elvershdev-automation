@@ -9,6 +9,7 @@ import { LoadingState } from '@/components/LoadingState';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Select } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { api } from '@/lib/api';
 import { statusTone } from '@/lib/status';
@@ -122,18 +123,18 @@ export function ProjectsPage() {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
-        <select
-          className="h-10 rounded-md border px-3 text-sm"
+        <Select
+          className="w-[180px]"
           value={status}
           onChange={(e) => setStatus(e.target.value)}
-        >
-          <option value="">All statuses</option>
-          {['DRAFT', 'PROCESSING', 'RENDERING', 'READY', 'FAILED', 'PUBLISHED'].map((s) => (
-            <option key={s} value={s}>
-              {s}
-            </option>
-          ))}
-        </select>
+          options={[
+            { value: '', label: 'All statuses' },
+            ...['DRAFT', 'PROCESSING', 'RENDERING', 'READY', 'FAILED', 'PUBLISHED'].map((s) => ({
+              value: s,
+              label: s,
+            })),
+          ]}
+        />
       </div>
 
       {isLoading ? (

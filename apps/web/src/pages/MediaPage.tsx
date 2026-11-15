@@ -7,6 +7,7 @@ import { ErrorState } from '@/components/ErrorState';
 import { LoadingState } from '@/components/LoadingState';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Select } from '@/components/ui/select';
 import { api } from '@/lib/api';
 
 export function MediaPage() {
@@ -86,18 +87,15 @@ export function MediaPage() {
         </div>
       </div>
 
-      <select
-        className="h-10 rounded-md border px-3 text-sm"
+      <Select
+        className="w-[180px]"
         value={type}
         onChange={(e) => setType(e.target.value)}
-      >
-        <option value="">All types</option>
-        {['IMAGE', 'AUDIO', 'VIDEO'].map((t) => (
-          <option key={t} value={t}>
-            {t}
-          </option>
-        ))}
-      </select>
+        options={[
+          { value: '', label: 'All types' },
+          ...['IMAGE', 'AUDIO', 'VIDEO'].map((t) => ({ value: t, label: t })),
+        ]}
+      />
 
       {isLoading ? (
         <LoadingState />

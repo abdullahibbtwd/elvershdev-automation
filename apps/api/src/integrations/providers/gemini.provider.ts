@@ -14,10 +14,20 @@ import {
   createMockStoryResult,
   createMockVisualAnalysis,
   estimateGeminiCostUsd,
+  captionSuggestionResultJsonSchema,
+  generatedScenePlanJsonSchema,
   generatedScenePlanSchema,
+  generatedStoryJsonSchema,
   generatedStorySchema,
   getGeminiPricingFromEnv,
+  normalizeCaptionSuggestionResultInput,
+  normalizeGeneratedScenePlanInput,
+  normalizeGeneratedStoryInput,
+  normalizePlannedNarrationScriptInput,
+  normalizeVisualAnalysisBatchInput,
+  plannedNarrationScriptJsonSchema,
   plannedNarrationScriptSchema,
+  visualAnalysisBatchJsonSchema,
   visualAnalysisBatchSchema,
   type CaptionSuggestionInput,
   type CaptionSuggestionResult,
@@ -70,7 +80,7 @@ export class GeminiProvider extends BaseProvider {
   }
 
   getModel(): string {
-    return this.config.get<string>('integrations.geminiModel', 'gemini-2.0-flash');
+    return this.config.get<string>('integrations.geminiModel', 'gemini-3.8-flash');
   }
 
   async generateStoryContent(brief: StoryBriefInput): Promise<GeminiJsonResult<GeneratedStory>> {
@@ -89,7 +99,10 @@ export class GeminiProvider extends BaseProvider {
     }
 
     const prompt = buildStoryGenerationPrompt(brief);
-    return this.generateJson('story_generation', prompt, generatedStorySchema);
+    return this.generateJson('story_generation', prompt, generatedStorySchema, {
+      responseJsonSchema: generatedStoryJsonSchema as unknown as Record<string, unknown>,
+      normalize: normalizeGeneratedStoryInput,
+    });
   }
 
   async planScenes(input: {
@@ -111,7 +124,10 @@ export class GeminiProvider extends BaseProvider {
     }
 
     const prompt = buildScenePlanningPrompt(input);
-    const result = await this.generateJson('scene_planning', prompt, generatedScenePlanSchema);
+    const result = await this.generateJson('scene_planning', prompt, generatedScenePlanSchema, {
+      responseJsonSchema: generatedScenePlanJsonSchema as unknown as Record<string, unknown>,
+      normalize: normalizeGeneratedScenePlanInput,
+    });
     this.assertDurationApprox(result.data, input.brief.desiredDurationSeconds);
     return result;
   }
@@ -148,7 +164,10 @@ export class GeminiProvider extends BaseProvider {
       ...input,
       aspectRatio,
     });
-    return this.generateJson('visual_analysis', prompt, visualAnalysisBatchSchema);
+    return this.generateJson('visual_analysis', prompt, visualAnalysisBatchSchema, {
+      responseJsonSchema: visualAnalysisBatchJsonSchema as unknown as Record<string, unknown>,
+      normalize: normalizeVisualAnalysisBatchInput,
+    });
   }
 
   /** @deprecated kept for compatibility */
@@ -180,7 +199,10 @@ export class GeminiProvider extends BaseProvider {
     }
 
     const prompt = buildNarrationPlanningPrompt(input);
-    return this.generateJson('narration_planning', prompt, plannedNarrationScriptSchema);
+    return this.generateJson('narration_planning', prompt, plannedNarrationScriptSchema, {
+      responseJsonSchema: plannedNarrationScriptJsonSchema as unknown as Record<string, unknown>,
+      normalize: normalizePlannedNarrationScriptInput,
+    });
   }
 
   async suggestSocialCaption(
@@ -201,7 +223,10 @@ export class GeminiProvider extends BaseProvider {
     }
 
     const prompt = buildCaptionSuggestionPrompt(input);
-    return this.generateJson('social_caption', prompt, captionSuggestionResultSchema);
+    return this.generateJson('social_caption', prompt, captionSuggestionResultSchema, {
+      responseJsonSchema: captionSuggestionResultJsonSchema as unknown as Record<string, unknown>,
+      normalize: normalizeCaptionSuggestionResultInput,
+    });
   }
 
   /**
@@ -220,6 +245,10 @@ export class GeminiProvider extends BaseProvider {
     requestType: string,
     prompt: string,
     schema: ParseableSchema<T>,
+    options?: {
+      responseJsonSchema?: Record<string, unknown>;
+      normalize?: (raw: unknown) => unknown;
+    },
   ): Promise<GeminiJsonResult<T>> {
     const apiKey = this.assertConfigured(
       this.config.get<string>('integrations.geminiApiKey'),
@@ -241,6 +270,9 @@ export class GeminiProvider extends BaseProvider {
             config: {
               responseMimeType: 'application/json',
               temperature: 0.7,
+              ...(options?.responseJsonSchema
+                ? { responseJsonSchema: options.responseJsonSchema }
+                : {}),
             },
           }),
           new Promise<never>((_, reject) => {
@@ -259,7 +291,8 @@ export class GeminiProvider extends BaseProvider {
           throw new Error('Gemini returned invalid JSON');
         }
 
-        const data = schema.parse(parsed);
+        const normalized = options?.normalize ? options.normalize(parsed) : parsed;
+        const data = schema.parse(normalized);
         const inputTokens = response.usageMetadata?.promptTokenCount ?? 0;
         const outputTokens = response.usageMetadata?.candidatesTokenCount ?? 0;
 

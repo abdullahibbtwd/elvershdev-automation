@@ -29,6 +29,7 @@ import { PageHeader } from '@/components/layout/PageHeader';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { Select } from '@/components/ui/select';
 import { api } from '@/lib/api';
 import {
   compact,
@@ -356,15 +357,16 @@ export function AnalyticsOverviewPage() {
               value={filter}
               onChange={(event) => setFilter(event.target.value)}
             />
-            <select
-              className="h-9 rounded-md border border-border bg-card px-3 text-sm text-foreground"
+            <Select
+              className="w-[160px]"
               value={sort}
               onChange={(event) => setSort(event.target.value as typeof sort)}
-            >
-              <option value="publishedAt">Newest</option>
-              <option value="views">Most views</option>
-              <option value="cost">Highest cost</option>
-            </select>
+              options={[
+                { value: 'publishedAt', label: 'Newest' },
+                { value: 'views', label: 'Most views' },
+                { value: 'cost', label: 'Highest cost' },
+              ]}
+            />
           </div>
         </div>
         {!content.data?.items.length ? (

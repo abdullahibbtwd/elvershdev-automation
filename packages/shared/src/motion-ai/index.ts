@@ -4,3 +4,7 @@ export * from './pricing';
 export * from './model-capabilities';
 export * from './mocks';
 export * from './video-provider';
+export * from './video-provider-selection';
+export * from './hailuo-request';
+export * from './normalize';
+export * from './json-schemas';

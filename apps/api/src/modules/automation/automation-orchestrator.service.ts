@@ -37,6 +37,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { RenderingService } from '../rendering/rendering.service';
 import { StoriesService } from '../stories/stories.service';
 import { VisualsService } from '../visuals/visuals.service';
+import { RealtimeEmitterService } from '../realtime/realtime-emitter.service';
 import { AutomationBudgetService } from './automation-budget.service';
 import { AutomationConfigService } from './automation-config.service';
 import { AutomationPublishSchedulerService } from './automation-publish-scheduler.service';
@@ -56,6 +57,21 @@ const TERMINAL_SCHEDULE_STATUSES: ContentScheduleStatus[] = [
   ContentScheduleStatus.SKIPPED,
 ];
 
+/** Mock AI still uses real queues; poll faster so E2E tests finish in seconds not minutes. */
+function stagePollDelayMs(normalMs: number, useMockAi = false): number {
+  if (!useMockAi) return normalMs;
+  return Math.min(normalMs, 400);
+}
+
+function isMockAiEnabled(explicit?: boolean): boolean {
+  if (explicit === true) return true;
+  return (
+    process.env.GEMINI_USE_MOCK === 'true' ||
+    process.env.FAL_USE_MOCK === 'true' ||
+    process.env.NODE_ENV === 'test'
+  );
+}
+
 @Injectable()
 export class AutomationOrchestratorService {
   private readonly logger = new Logger(AutomationOrchestratorService.name);
@@ -72,6 +88,7 @@ export class AutomationOrchestratorService {
     private readonly publishScheduler: AutomationPublishSchedulerService,
     private readonly notifications: NotificationsService,
     private readonly queueService: QueueService,
+    private readonly realtime: RealtimeEmitterService,
   ) {}
 
   async listExecutions(userId: string, query: ListExecutionsDto) {
@@ -246,6 +263,18 @@ export class AutomationOrchestratorService {
         },
       });
 
+      this.realtime.emitAutomationProgress(payload.userId, {
+        scheduleId: schedule.id,
+        stage: schedule.currentStage,
+        status: failed,
+        progress: automationStageProgress(schedule.currentStage as AutomationStageName),
+        message:
+          retryCount < schedule.maxRetries
+            ? `Stage failed — retry ${retryCount}/${schedule.maxRetries}`
+            : 'Pipeline failed',
+        error: message,
+      });
+
       if (retryCount < schedule.maxRetries) {
         const delay = Math.min(300_000, 5000 * 2 ** retryCount);
         await this.enqueueAdvance(payload.userId, schedule.id, 'retry', delay);
@@ -286,7 +315,7 @@ export class AutomationOrchestratorService {
     });
   }
 
-  async triggerSchedule(userId: string, scheduleId: string) {
+  async triggerSchedule(userId: string, scheduleId: string, options?: { publishNow?: boolean }) {
     const schedule = await this.prisma.contentSchedule.findFirst({
       where: { id: scheduleId, userId },
     });
@@ -294,16 +323,70 @@ export class AutomationOrchestratorService {
     if (schedule.status === ContentScheduleStatus.CANCELLED) {
       throw new ConflictException('Cancelled schedule cannot be triggered');
     }
+    const now = new Date();
     await this.prisma.contentSchedule.update({
       where: { id: scheduleId },
       data: {
         status: ContentScheduleStatus.QUEUED,
         pausedAt: null,
-        scheduledGenerationAt: new Date(),
+        scheduledGenerationAt: now,
+        ...(options?.publishNow ? { scheduledPublishAt: now } : {}),
       },
     });
     await this.enqueueAdvance(userId, scheduleId, 'start');
+    this.realtime.emitAutomationProgress(userId, {
+      scheduleId,
+      stage: schedule.currentStage,
+      status: ContentScheduleStatus.QUEUED,
+      progress: automationStageProgress(schedule.currentStage as AutomationStageName),
+      message: options?.publishNow
+        ? 'Queued for pipeline (publish immediately when ready)'
+        : 'Queued for pipeline',
+    });
     return { queued: true };
+  }
+
+  /** Fail fast before spending queue cycles when real providers are enabled without keys. */
+  assertRealProvidersConfigured() {
+    const missing: string[] = [];
+    const mockGemini = process.env.GEMINI_USE_MOCK === 'true';
+    const mockFal = process.env.FAL_USE_MOCK === 'true';
+    const mockHailuo = process.env.HAILUO_USE_MOCK === 'true';
+    const mockTts = process.env.GEMINI_TTS_USE_MOCK === 'true';
+    const klingEnabled = process.env.KLING_ENABLED === 'true';
+    const hailuoEnabled = process.env.HAILUO_ENABLED !== 'false';
+
+    if (!mockGemini && !process.env.GEMINI_API_KEY?.trim()) missing.push('GEMINI_API_KEY');
+    if (!mockTts && !process.env.GEMINI_API_KEY?.trim()) missing.push('GEMINI_API_KEY (TTS)');
+    // Images (Fal) + default motion (Hailuo via Fal) share FAL_API_KEY.
+    if ((!mockFal || (hailuoEnabled && !mockHailuo)) && !process.env.FAL_API_KEY?.trim()) {
+      missing.push('FAL_API_KEY');
+    }
+    // Kling is optional / disabled by default — only require keys when explicitly enabled.
+    if (klingEnabled && process.env.KLING_USE_MOCK !== 'true') {
+      const hasKling =
+        Boolean(process.env.KLING_API_KEY?.trim()) ||
+        (Boolean(process.env.KLING_ACCESS_KEY?.trim()) &&
+          Boolean(process.env.KLING_SECRET_KEY?.trim()));
+      if (!hasKling) missing.push('KLING_API_KEY or KLING_ACCESS_KEY+KLING_SECRET_KEY');
+    }
+
+    if (missing.length) {
+      throw new BadRequestException(
+        `Real AI mode is on but missing: ${[...new Set(missing)].join(', ')}. Add them to .env and restart API + worker.`,
+      );
+    }
+
+    return {
+      geminiMock: mockGemini,
+      falMock: mockFal,
+      hailuoMock: mockHailuo,
+      klingEnabled,
+      hailuoEnabled,
+      ttsMock: mockTts,
+      socialMock: process.env.SOCIAL_USE_MOCK === 'true',
+      motionProvider: process.env.VIDEO_GENERATION_PROVIDER || 'hailuo',
+    };
   }
 
   async recoverStalled(userId?: string) {
@@ -373,7 +456,7 @@ export class AutomationOrchestratorService {
       return this.ensureStory(schedule, config, useMockAi);
     }
     if (stage === AutomationStage.SCENE_PLANNING) {
-      return this.ensureScenes(schedule);
+      return this.ensureScenes(schedule, useMockAi);
     }
     if (stage === AutomationStage.VISUAL_INTELLIGENCE) {
       return this.ensureVisuals(schedule, config, useMockAi);
@@ -419,7 +502,12 @@ export class AutomationOrchestratorService {
         return this.completeStage(schedule, AutomationStage.SCENE_PLANNING);
       }
       if (story?.status === StoryStatus.GENERATING) {
-        await this.enqueueAdvance(schedule.userId, schedule.id, 'advance', 5000);
+        await this.enqueueAdvance(
+          schedule.userId,
+          schedule.id,
+          'advance',
+          stagePollDelayMs(5000, useMockAi),
+        );
         return { waiting: true, stage: 'STORY_GENERATION' };
       }
       if (story?.status === StoryStatus.FAILED) {
@@ -440,13 +528,21 @@ export class AutomationOrchestratorService {
     };
 
     const result = await this.storiesService.generate(schedule.userId, {
-      topic: brief.topic,
-      niche: brief.niche,
-      targetAudience: brief.targetAudience,
-      language: brief.language ?? config.language,
-      tone: brief.tone,
-      desiredDurationSeconds: brief.desiredDurationSeconds,
-      category: brief.category,
+      topic: brief.topic?.trim() || schedule.contentPlan.ideaTitle || 'Untitled story',
+      niche: brief.niche?.trim() || config.storyGenres[0] || 'Cinematic storytelling',
+      targetAudience:
+        brief.targetAudience?.trim() ||
+        config.targetAudience?.trim() ||
+        'General audience',
+      language: brief.language?.trim() || config.language?.trim() || 'en',
+      tone: brief.tone?.trim() || config.tone?.trim() || 'Inspirational',
+      desiredDurationSeconds:
+        brief.desiredDurationSeconds || config.targetDurationSeconds || 60,
+      category:
+        brief.category?.trim() ||
+        schedule.contentPlan.category ||
+        config.contentCategories[0] ||
+        'Narrative',
       additionalInstructions: brief.additionalInstructions,
       ...(useMockAi ? {} : {}),
     });
@@ -466,12 +562,18 @@ export class AutomationOrchestratorService {
     ]);
 
     await this.recordExecution(schedule, AutomationStage.STORY_GENERATION, result.job.id);
-    await this.enqueueAdvance(schedule.userId, schedule.id, 'advance', 4000);
+    await this.enqueueAdvance(
+      schedule.userId,
+      schedule.id,
+      'advance',
+      stagePollDelayMs(4000, useMockAi),
+    );
     return { started: true, storyId: result.story.id };
   }
 
   private async ensureScenes(
     schedule: Prisma.ContentScheduleGetPayload<{ include: { contentPlan: true } }>,
+    useMockAi = false,
   ) {
     if (!schedule.storyId) throw new Error('Missing storyId');
     const story = await this.prisma.story.findUnique({
@@ -492,7 +594,12 @@ export class AutomationOrchestratorService {
       },
     });
     if (active || story.status === StoryStatus.GENERATING) {
-      await this.enqueueAdvance(schedule.userId, schedule.id, 'advance', 4000);
+      await this.enqueueAdvance(
+        schedule.userId,
+        schedule.id,
+        'advance',
+        stagePollDelayMs(4000, useMockAi),
+      );
       return { waiting: true, stage: 'SCENE_PLANNING' };
     }
 
@@ -500,11 +607,21 @@ export class AutomationOrchestratorService {
       await this.beginStage(schedule, AutomationStage.SCENE_PLANNING, ContentScheduleStatus.GENERATING);
       const result = await this.storiesService.planScenes(schedule.userId, story.id);
       await this.recordExecution(schedule, AutomationStage.SCENE_PLANNING, result.job.id);
-      await this.enqueueAdvance(schedule.userId, schedule.id, 'advance', 4000);
+      await this.enqueueAdvance(
+        schedule.userId,
+        schedule.id,
+        'advance',
+        stagePollDelayMs(4000, useMockAi),
+      );
       return { started: true, scenePlanning: true };
     }
 
-    await this.enqueueAdvance(schedule.userId, schedule.id, 'advance', 4000);
+    await this.enqueueAdvance(
+      schedule.userId,
+      schedule.id,
+      'advance',
+      stagePollDelayMs(4000, useMockAi),
+    );
     return { waiting: true };
   }
 
@@ -537,7 +654,12 @@ export class AutomationOrchestratorService {
       },
     });
     if (active) {
-      await this.enqueueAdvance(schedule.userId, schedule.id, 'advance', 6000);
+      await this.enqueueAdvance(
+        schedule.userId,
+        schedule.id,
+        'advance',
+        stagePollDelayMs(6000, useMockAi),
+      );
       return { waiting: true, stage: 'VISUAL_INTELLIGENCE' };
     }
 
@@ -546,7 +668,12 @@ export class AutomationOrchestratorService {
       ...(config.visualStyleId ? { visualStyleId: config.visualStyleId } : {}),
     });
     await this.recordExecution(schedule, AutomationStage.VISUAL_INTELLIGENCE, result.job?.id);
-    await this.enqueueAdvance(schedule.userId, schedule.id, 'advance', 6000);
+    await this.enqueueAdvance(
+      schedule.userId,
+      schedule.id,
+      'advance',
+      stagePollDelayMs(6000, useMockAi),
+    );
     return { started: true, useMockAi };
   }
 
@@ -587,14 +714,24 @@ export class AutomationOrchestratorService {
       },
     });
     if (active) {
-      await this.enqueueAdvance(schedule.userId, schedule.id, 'advance', 8000);
+      await this.enqueueAdvance(
+        schedule.userId,
+        schedule.id,
+        'advance',
+        stagePollDelayMs(8000, useMockAi),
+      );
       return { waiting: true, stage: 'MOTION_GENERATION' };
     }
 
     await this.beginStage(schedule, AutomationStage.MOTION_GENERATION, ContentScheduleStatus.GENERATING);
     await this.motionService.generateForStory(schedule.userId, schedule.storyId, {});
     await this.recordExecution(schedule, AutomationStage.MOTION_GENERATION);
-    await this.enqueueAdvance(schedule.userId, schedule.id, 'advance', 8000);
+    await this.enqueueAdvance(
+      schedule.userId,
+      schedule.id,
+      'advance',
+      stagePollDelayMs(8000, useMockAi),
+    );
     return { started: true, useMockAi };
   }
 
@@ -622,7 +759,12 @@ export class AutomationOrchestratorService {
       },
     });
     if (active) {
-      await this.enqueueAdvance(schedule.userId, schedule.id, 'advance', 5000);
+      await this.enqueueAdvance(
+        schedule.userId,
+        schedule.id,
+        'advance',
+        stagePollDelayMs(5000, useMockAi),
+      );
       return { waiting: true, stage: 'NARRATION' };
     }
 
@@ -635,7 +777,12 @@ export class AutomationOrchestratorService {
       AutomationStage.NARRATION,
       (result as { job?: { id?: string } })?.job?.id,
     );
-    await this.enqueueAdvance(schedule.userId, schedule.id, 'advance', 5000);
+    await this.enqueueAdvance(
+      schedule.userId,
+      schedule.id,
+      'advance',
+      stagePollDelayMs(5000, useMockAi),
+    );
     return { started: true };
   }
 
@@ -661,6 +808,7 @@ export class AutomationOrchestratorService {
       scenes.length > 0 &&
       scenes.every((scene) => scene.audioGenerations.length > 0);
     if (ready) {
+      await this.ensureNarrationApprovedForAutomation(schedule.userId, schedule.storyId);
       return this.completeStage(schedule, AutomationStage.RENDER);
     }
 
@@ -678,7 +826,12 @@ export class AutomationOrchestratorService {
       },
     });
     if (active) {
-      await this.enqueueAdvance(schedule.userId, schedule.id, 'advance', 6000);
+      await this.enqueueAdvance(
+        schedule.userId,
+        schedule.id,
+        'advance',
+        stagePollDelayMs(6000, useMockAi),
+      );
       return { waiting: true, stage: 'SPEECH' };
     }
 
@@ -688,8 +841,36 @@ export class AutomationOrchestratorService {
       ...(config.narrationVoiceId ? { voiceProfileId: config.narrationVoiceId } : {}),
     });
     await this.recordExecution(schedule, AutomationStage.SPEECH);
-    await this.enqueueAdvance(schedule.userId, schedule.id, 'advance', 6000);
+    await this.enqueueAdvance(
+      schedule.userId,
+      schedule.id,
+      'advance',
+      stagePollDelayMs(6000, useMockAi),
+    );
     return { started: true };
+  }
+
+  /**
+   * Unattended automation has no human approval step. Promote READY narration to
+   * APPROVED so render readiness (which requires APPROVED) can proceed.
+   */
+  private async ensureNarrationApprovedForAutomation(userId: string, storyId: string) {
+    const script = await this.prisma.narrationScript.findFirst({
+      where: {
+        userId,
+        storyId,
+        status: { in: [NarrationScriptStatus.READY, NarrationScriptStatus.APPROVED] },
+      },
+      orderBy: { version: 'desc' },
+    });
+    if (!script) {
+      throw new Error('Narration script is not ready for automated render approval');
+    }
+    if (script.status === NarrationScriptStatus.APPROVED) {
+      return script;
+    }
+    this.logger.log(`Auto-approving narration script ${script.id} for automation story ${storyId}`);
+    return this.narrationService.approveScript(userId, script.id);
   }
 
   private async ensureRender(
@@ -719,7 +900,12 @@ export class AutomationOrchestratorService {
           VideoRenderStatus.COMPLETED,
         ];
         if (!terminal.includes(render.status)) {
-          await this.enqueueAdvance(schedule.userId, schedule.id, 'advance', 8000);
+          await this.enqueueAdvance(
+            schedule.userId,
+            schedule.id,
+            'advance',
+            stagePollDelayMs(8000, useMockAi),
+          );
           return { waiting: true, stage: 'RENDER' };
         }
         if (render.status === VideoRenderStatus.FAILED) {
@@ -728,9 +914,16 @@ export class AutomationOrchestratorService {
       }
     }
 
+    await this.ensureNarrationApprovedForAutomation(schedule.userId, schedule.storyId);
+
     const readiness = await this.renderingService.getReadiness(schedule.userId, schedule.storyId);
     if (!readiness.canRender) {
-      await this.enqueueAdvance(schedule.userId, schedule.id, 'advance', 8000);
+      await this.enqueueAdvance(
+        schedule.userId,
+        schedule.id,
+        'advance',
+        stagePollDelayMs(8000, useMockAi),
+      );
       return { waiting: true, reason: 'Render readiness not met', missing: readiness.missing };
     }
 
@@ -746,7 +939,12 @@ export class AutomationOrchestratorService {
       AutomationStage.RENDER,
       render.generationJob?.id ?? undefined,
     );
-    await this.enqueueAdvance(schedule.userId, schedule.id, 'advance', 8000);
+    await this.enqueueAdvance(
+      schedule.userId,
+      schedule.id,
+      'advance',
+      stagePollDelayMs(8000, useMockAi),
+    );
     return { started: true, videoRenderId: renderId, useMockAi };
   }
 
@@ -803,15 +1001,23 @@ export class AutomationOrchestratorService {
     stage: AutomationStage,
     status: ContentScheduleStatus,
   ) {
+    const progress = automationStageProgress(stage as AutomationStageName);
     await this.prisma.contentSchedule.update({
       where: { id: schedule.id },
       data: {
         currentStage: stage,
         status,
-        progress: automationStageProgress(stage as AutomationStageName),
+        progress,
         stageStartedAt: new Date(),
         ...(!schedule.startedAt ? { startedAt: new Date() } : {}),
       },
+    });
+    this.realtime.emitAutomationProgress(schedule.userId, {
+      scheduleId: schedule.id,
+      stage,
+      status,
+      progress,
+      message: `Started ${stage}`,
     });
   }
 
@@ -819,7 +1025,17 @@ export class AutomationOrchestratorService {
     schedule: { id: string; userId: string; startedAt: Date | null },
     next: AutomationStage,
   ) {
-    const progress = automationStageProgress(next as AutomationStageName);
+    const progress =
+      next === AutomationStage.DONE
+        ? 100
+        : automationStageProgress(next as AutomationStageName);
+    const status =
+      next === AutomationStage.DONE
+        ? ContentScheduleStatus.COMPLETED
+        : next === AutomationStage.PUBLISH_SCHEDULE
+          ? ContentScheduleStatus.SCHEDULING_PUBLISH
+          : ContentScheduleStatus.GENERATING;
+
     await this.prisma.contentSchedule.update({
       where: { id: schedule.id },
       data: {
@@ -840,8 +1056,24 @@ export class AutomationOrchestratorService {
       },
     });
 
+    this.realtime.emitAutomationProgress(schedule.userId, {
+      scheduleId: schedule.id,
+      stage: next,
+      status,
+      progress,
+      message:
+        next === AutomationStage.DONE
+          ? 'Pipeline complete'
+          : `Advanced to ${next}`,
+    });
+
     if (next !== AutomationStage.DONE) {
-      await this.enqueueAdvance(schedule.userId, schedule.id, 'advance', 1000);
+      await this.enqueueAdvance(
+        schedule.userId,
+        schedule.id,
+        'advance',
+        stagePollDelayMs(1000, isMockAiEnabled()),
+      );
     }
     return { advancedTo: next, nextHint: nextAutomationStage(next as AutomationStageName) };
   }

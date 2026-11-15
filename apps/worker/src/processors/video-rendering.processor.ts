@@ -212,6 +212,15 @@ export function createVideoRenderingProcessor(logger: Logger): Processor {
         signal: abort.signal,
       });
 
+      const narrationProbe = await ffmpeg.probeMedia(narrationPath, abort.signal);
+      const narrationDur = narrationProbe.durationSeconds ?? 0;
+      if (narrationDur < Math.max(1, timeline.totalDurationSeconds * 0.85)) {
+        throw new Error(
+          `Narration mix too short (${narrationDur.toFixed(2)}s vs timeline ${timeline.totalDurationSeconds.toFixed(2)}s). ` +
+            `Expected ${narrationClips.length} scene clips.`,
+        );
+      }
+
       let musicPath: string | null = null;
       if (render.backgroundMusicAsset?.storageKey) {
         musicPath = await ensureLocal(
@@ -265,6 +274,9 @@ export function createVideoRenderingProcessor(logger: Logger): Processor {
         assSubtitlePath: settings.subtitleEnabled ? assPath : null,
         srtSubtitlePath: settings.subtitleEnabled ? srtPath : null,
         burnSubtitles: settings.subtitleEnabled && settings.subtitleBurnedIn,
+        subtitleCues: settings.subtitleEnabled ? timeline.subtitleCues : [],
+        subtitleStyle: settings.subtitleStyle,
+        workDir,
         signal: abort.signal,
       });
 

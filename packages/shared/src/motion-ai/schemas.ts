@@ -31,11 +31,23 @@ export const motionAnalysisBatchSchema = z.object({
 
 export const klingResolutionSchema = z.enum(['720p', '1080p']);
 export const klingDurationSchema = z.union([z.literal(5), z.literal(10)]);
+export const hailuoResolutionSchema = z.enum(['512P', '768P']);
+export const hailuoDurationSchema = z.union([z.literal(6), z.literal(10)]);
+export const videoProviderIdSchema = z.enum(['hailuo', 'kling']);
+
+/** Accepts both Kling and Hailuo duration/resolution values; provider-specific checks run in the service. */
+export const motionDurationSchema = z.union([
+  z.literal(5),
+  z.literal(6),
+  z.literal(10),
+]);
+export const motionResolutionSchema = z.enum(['720p', '1080p', '512P', '768P']);
 
 export const generateStoryMotionSchema = z.object({
+  provider: videoProviderIdSchema.optional(),
   sceneIds: z.array(z.string().uuid()).optional(),
-  durationSeconds: klingDurationSchema.optional(),
-  resolution: klingResolutionSchema.optional(),
+  durationSeconds: motionDurationSchema.optional(),
+  resolution: motionResolutionSchema.optional(),
   motionPrompt: z.string().min(1).max(2500).optional(),
   negativePrompt: z.string().max(1000).optional(),
   skipAnalysis: z.boolean().optional(),
@@ -43,8 +55,9 @@ export const generateStoryMotionSchema = z.object({
 });
 
 export const generateSceneMotionSchema = z.object({
-  durationSeconds: klingDurationSchema.optional(),
-  resolution: klingResolutionSchema.optional(),
+  provider: videoProviderIdSchema.optional(),
+  durationSeconds: motionDurationSchema.optional(),
+  resolution: motionResolutionSchema.optional(),
   motionPrompt: z.string().min(1).max(2500).optional(),
   negativePrompt: z.string().max(1000).optional(),
   sourceVisualId: z.string().uuid().optional(),
@@ -65,6 +78,11 @@ export type GenerateSceneMotionInput = z.infer<typeof generateSceneMotionSchema>
 export type UpdateMotionGenerationInput = z.infer<typeof updateMotionGenerationSchema>;
 export type KlingResolution = z.infer<typeof klingResolutionSchema>;
 export type KlingDuration = z.infer<typeof klingDurationSchema>;
+export type HailuoResolutionSchema = z.infer<typeof hailuoResolutionSchema>;
+export type HailuoDurationSchema = z.infer<typeof hailuoDurationSchema>;
+export type VideoProviderIdSchema = z.infer<typeof videoProviderIdSchema>;
+export type MotionDuration = z.infer<typeof motionDurationSchema>;
+export type MotionResolution = z.infer<typeof motionResolutionSchema>;
 
 export type MotionJobAction =
   | 'analyze_story_motion'

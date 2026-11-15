@@ -10,6 +10,8 @@ import {
   createMockNarrationPlan,
   estimateGeminiCostUsd,
   getGeminiPricingFromEnv,
+  normalizePlannedNarrationScriptInput,
+  plannedNarrationScriptJsonSchema,
   plannedNarrationScriptSchema,
   type GenerationQueuePayload,
   type NarrationPlanningInput,
@@ -58,7 +60,7 @@ async function planNarrationWithGemini(
     throw new Error('GEMINI_API_KEY is not configured');
   }
 
-  const model = process.env.GEMINI_MODEL ?? 'gemini-2.0-flash';
+  const model = process.env.GEMINI_MODEL ?? 'gemini-3.8-flash';
   const timeoutMs = parseInt(process.env.GEMINI_TIMEOUT_MS ?? '60000', 10);
   const ai = new GoogleGenAI({ apiKey });
   const prompt = buildNarrationPlanningPrompt(input);
@@ -70,6 +72,7 @@ async function planNarrationWithGemini(
       config: {
         responseMimeType: 'application/json',
         temperature: 0.5,
+        responseJsonSchema: plannedNarrationScriptJsonSchema as unknown as Record<string, unknown>,
       },
     }),
     new Promise<never>((_, reject) => {
@@ -85,7 +88,7 @@ async function planNarrationWithGemini(
     throw new Error('Gemini returned invalid JSON for narration planning');
   }
 
-  const data = plannedNarrationScriptSchema.parse(parsed);
+  const data = plannedNarrationScriptSchema.parse(normalizePlannedNarrationScriptInput(parsed));
   const inputTokens = response.usageMetadata?.promptTokenCount ?? 0;
   const outputTokens = response.usageMetadata?.candidatesTokenCount ?? 0;
 

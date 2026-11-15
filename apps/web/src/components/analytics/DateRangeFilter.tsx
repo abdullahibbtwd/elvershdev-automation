@@ -1,4 +1,6 @@
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Select } from '@/components/ui/select';
 import type { DatePreset, RangeParams } from '@/lib/analytics';
 
 const presets: Array<{ value: DatePreset; label: string }> = [
@@ -18,43 +20,39 @@ export function DateRangeFilter({
   onChange: (value: RangeParams) => void;
 }) {
   return (
-    <div className="flex flex-wrap items-end gap-2">
-      <label className="text-xs font-medium text-muted-foreground">
-        Date range
-        <select
-          className="mt-1 block h-10 rounded-md border border-border bg-card px-3 text-sm text-foreground transition-all duration-200 hover:border-primary/40"
+    <div className="flex flex-wrap items-end gap-3">
+      <div className="space-y-1.5">
+        <Label htmlFor="date-range-preset">Date range</Label>
+        <Select
+          id="date-range-preset"
+          className="w-[180px]"
           value={value.preset}
           onChange={(event) =>
             onChange({ ...value, preset: event.target.value as DatePreset })
           }
-        >
-          {presets.map((preset) => (
-            <option key={preset.value} value={preset.value}>
-              {preset.label}
-            </option>
-          ))}
-        </select>
-      </label>
+          options={presets}
+        />
+      </div>
       {value.preset === 'custom' && (
         <>
-          <label className="text-xs font-medium text-muted-foreground">
-            From
+          <div className="space-y-1.5">
+            <Label htmlFor="date-range-from">From</Label>
             <Input
-              className="mt-1"
+              id="date-range-from"
               type="date"
               value={value.from ?? ''}
               onChange={(event) => onChange({ ...value, from: event.target.value })}
             />
-          </label>
-          <label className="text-xs font-medium text-muted-foreground">
-            To
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="date-range-to">To</Label>
             <Input
-              className="mt-1"
+              id="date-range-to"
               type="date"
               value={value.to ?? ''}
               onChange={(event) => onChange({ ...value, to: event.target.value })}
             />
-          </label>
+          </div>
         </>
       )}
     </div>

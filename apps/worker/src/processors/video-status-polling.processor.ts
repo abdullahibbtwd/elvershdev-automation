@@ -2,9 +2,13 @@ import type { Job, Processor } from 'bullmq';
 import { JobStatus, MotionGenerationStatus, Prisma } from '@prisma/client';
 import type { MotionPollQueuePayload } from '@ai-video/shared';
 import { enqueueMotionDownloadJob, enqueueMotionPollJob } from '../lib/enqueue';
-import { getKlingTaskStatus, shouldUseKlingMock } from '../lib/kling';
 import type { Logger } from '../lib/logger';
 import { getPrisma } from '../lib/prisma';
+import {
+  resolveVideoProvider,
+  resolveVideoProviderId,
+  shouldUseVideoProviderMock,
+} from '../lib/video-providers';
 
 export function createVideoStatusPollingProcessor(logger: Logger): Processor {
   return async (job: Job<MotionPollQueuePayload>) => {
@@ -17,6 +21,7 @@ export function createVideoStatusPollingProcessor(logger: Logger): Processor {
         motionGenerationId: data.motionGenerationId,
         providerTaskId: data.providerTaskId,
         pollAttempt: data.pollAttempt,
+        provider: data.provider,
       },
       'Video status poll started',
     );
@@ -55,17 +60,25 @@ export function createVideoStatusPollingProcessor(logger: Logger): Processor {
       }
     }
 
+    const providerId = resolveVideoProviderId(
+      data.provider || motion.provider || process.env.VIDEO_GENERATION_PROVIDER,
+    );
+    const provider = resolveVideoProvider(providerId);
+
     try {
       if (data.simulateFailure) {
         throw new Error('Simulated failure in video-status-polling');
       }
 
-      const forceMock = data.useMockAi === true || shouldUseKlingMock();
-      if (forceMock && !process.env.KLING_USE_MOCK) {
-        process.env.KLING_USE_MOCK = 'true';
+      const forceMock = data.useMockAi === true || shouldUseVideoProviderMock(providerId);
+      if (forceMock) {
+        const mockEnvKey = providerId === 'kling' ? 'KLING_USE_MOCK' : 'HAILUO_USE_MOCK';
+        if (!process.env[mockEnvKey]) {
+          process.env[mockEnvKey] = 'true';
+        }
       }
 
-      const status = await getKlingTaskStatus(data.providerTaskId);
+      const status = await provider.getTaskStatus(data.providerTaskId);
 
       const progressUpdate = await prisma.motionGeneration.updateMany({
         where: {
@@ -93,6 +106,7 @@ export function createVideoStatusPollingProcessor(logger: Logger): Processor {
           providerTaskId: data.providerTaskId,
           videoUrl,
           useMockAi: forceMock,
+          provider: providerId,
         });
 
         if (status.actualCostUsd != null) {
@@ -105,7 +119,7 @@ export function createVideoStatusPollingProcessor(logger: Logger): Processor {
           });
         }
 
-        return { status: 'succeeded', enqueuedDownload: true };
+        return { status: 'succeeded', enqueuedDownload: true, provider: providerId };
       }
 
       if (status.status === 'failed' || status.status === 'cancelled') {
@@ -134,11 +148,11 @@ export function createVideoStatusPollingProcessor(logger: Logger): Processor {
           });
         }
 
-        return { status: status.status };
+        return { status: status.status, provider: providerId };
       }
 
       if (data.pollAttempt >= data.maxPollAttempts) {
-        const message = `Kling task polling timed out after ${data.maxPollAttempts} attempts`;
+        const message = `${providerId} task polling timed out after ${data.maxPollAttempts} attempts`;
         await prisma.motionGeneration.update({
           where: { id: motion.id },
           data: {
@@ -158,19 +172,20 @@ export function createVideoStatusPollingProcessor(logger: Logger): Processor {
             },
           });
         }
-        return { status: 'timeout' };
+        return { status: 'timeout', provider: providerId };
       }
 
       // Still submitted/processing — schedule next bounded poll.
       await enqueueMotionPollJob(
         {
           ...data,
+          provider: providerId,
           pollAttempt: data.pollAttempt + 1,
         },
         data.pollIntervalSeconds * 1000,
       );
 
-      return { status: status.status, nextPollAttempt: data.pollAttempt + 1 };
+      return { status: status.status, nextPollAttempt: data.pollAttempt + 1, provider: providerId };
     } catch (error) {
       const message = (error as Error).message || 'Video status polling failed';
       logger.error(
@@ -178,6 +193,7 @@ export function createVideoStatusPollingProcessor(logger: Logger): Processor {
           err: error,
           motionGenerationId: data.motionGenerationId,
           pollAttempt: data.pollAttempt,
+          provider: providerId,
         },
         message,
       );
@@ -192,11 +208,12 @@ export function createVideoStatusPollingProcessor(logger: Logger): Processor {
         await enqueueMotionPollJob(
           {
             ...data,
+            provider: providerId,
             pollAttempt: data.pollAttempt + 1,
           },
           data.pollIntervalSeconds * 1000,
         );
-        return { status: 'retry_scheduled', error: message };
+        return { status: 'retry_scheduled', error: message, provider: providerId };
       }
 
       await prisma.motionGeneration.update({

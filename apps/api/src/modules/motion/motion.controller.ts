@@ -98,6 +98,13 @@ export class SceneMotionController {
 export class MotionController {
   constructor(private readonly motionService: MotionService) {}
 
+  @Get('providers')
+  @ApiOperation({ summary: 'List video generation providers and availability' })
+  async listProviders() {
+    const providers = this.motionService.listVideoProviders();
+    return { success: true, data: { providers } };
+  }
+
   @Get(':motionId')
   @ApiOperation({ summary: 'Get a motion generation by id' })
   async getMotion(

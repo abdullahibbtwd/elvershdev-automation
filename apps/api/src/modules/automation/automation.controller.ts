@@ -93,6 +93,60 @@ export class AutomationController {
     return { success: true, data: planned };
   }
 
+  @Post('test-e2e')
+  @ApiOperation({
+    summary:
+      'One-click end-to-end test: enable automation, create an approved plan, and start generate→render→publish immediately',
+  })
+  async testE2e(@CurrentUser() user: AuthenticatedUser) {
+    const providers = this.orchestrator.assertRealProvidersConfigured();
+    await this.configService.enable(user.id);
+    // Ensure story-brief required fields are never blank (empty strings fail Zod min(2)).
+    await this.configService.update(user.id, {
+      targetAudience: 'General audience',
+      tone: 'Inspirational',
+      // Keep E2E short (fewer scenes) when testing the full pipeline.
+      targetDurationSeconds: 30,
+    });
+    const stamp = new Date().toISOString();
+    const plan = await this.planner.createManualPlan(user.id, {
+      ideaTitle: `Live E2E ${stamp}`,
+      ideaSummary:
+        'Live end-to-end test: plan → generate → render → publish to connected channels.',
+      topic: `A short cinematic tale of a lighthouse keeper who receives a mysterious signal from the sea (${stamp})`,
+      theme: 'mystery',
+      genre: 'Cinematic storytelling',
+      category: 'Narrative',
+    });
+    const scheduleId = plan.schedule?.id;
+    if (!scheduleId) {
+      return {
+        success: false,
+        data: { planId: plan.id, scheduleId: null },
+        message: 'Plan created but no schedule was attached',
+      };
+    }
+    // Publish as soon as render completes (do not wait for the normal staggered window).
+    await this.orchestrator.triggerSchedule(user.id, scheduleId, { publishNow: true });
+    const live =
+      !providers.geminiMock &&
+      !providers.falMock &&
+      !providers.hailuoMock &&
+      !providers.socialMock;
+    return {
+      success: true,
+      data: {
+        planId: plan.id,
+        scheduleId,
+        status: 'QUEUED',
+        providers,
+        message: live
+          ? 'LIVE E2E started (real AI + real publish). This will spend credits and post to connected channels.'
+          : 'E2E started. Some providers are still mocked — check GEMINI/FAL/KLING/SOCIAL_USE_MOCK.',
+      },
+    };
+  }
+
   @Get('plans')
   async listPlans(@CurrentUser() user: AuthenticatedUser, @Query() query: ListPlansDto) {
     const result = await this.planner.listPlans(user.id, query);

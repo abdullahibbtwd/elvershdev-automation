@@ -10,8 +10,11 @@ export type VideoProviderTaskStatus =
 
 export interface ImageToVideoSubmitInput {
   imageUrl: string;
-  /** Optional base64 image when URL hosting is unavailable */
+  /** Optional base64 image when URL hosting is unavailable (Kling). Hailuo prefers HTTP(S) URLs. */
   imageBase64?: string;
+  /** Optional raw image bytes for providers that can upload to their own temporary storage (Hailuo/fal). */
+  imageBytes?: Uint8Array;
+  imageMimeType?: string;
   motionPrompt: string;
   negativePrompt?: string;
   durationSeconds: KlingDuration | number;
@@ -21,6 +24,8 @@ export interface ImageToVideoSubmitInput {
   /** Prefer silent clips; narration/music added in later phases */
   audio?: 'off' | 'native';
   lastFrameUrl?: string;
+  /** Hailuo prompt optimizer (default true when supported) */
+  promptOptimizer?: boolean;
 }
 
 export interface ImageToVideoSubmitResult {

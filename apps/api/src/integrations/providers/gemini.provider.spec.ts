@@ -8,7 +8,7 @@ describe('GeminiProvider', () => {
         const map: Record<string, unknown> = {
           'integrations.geminiApiKey': env.GEMINI_API_KEY,
           'integrations.geminiUseMock': env.GEMINI_USE_MOCK,
-          'integrations.geminiModel': env.GEMINI_MODEL ?? 'gemini-2.0-flash',
+          'integrations.geminiModel': env.GEMINI_MODEL ?? 'gemini-3.8-flash',
           'integrations.geminiTimeoutMs': 60_000,
           'integrations.geminiMaxRetries': 3,
         };

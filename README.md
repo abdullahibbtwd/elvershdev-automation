@@ -89,7 +89,7 @@ pnpm --filter @ai-video/web dev
 | 3 Dashboard + projects/stories/media/jobs | Complete |
 | 4 AI story intelligence + scene planning | Complete |
 | 5 Visual intelligence + fal.ai scene images | Complete |
-| 6 AI motion + Kling image-to-video clips | Complete |
+| 6 AI motion + video clips (Hailuo default; Kling preserved) | Complete (Phase 6.1 Hailuo) |
 | 7 AI voice + Gemini TTS narration | Complete |
 | 8 FFmpeg video assembly / rendering | Implemented (verified with mock providers; see [checklist](docs/PRODUCTION_CHECKLIST.md)) |
 | 9 Social OAuth + publishing (Meta, TikTok, YouTube) | Implemented in code; **not verified against live platform accounts** |
@@ -226,33 +226,30 @@ Default output profile: **9:16 · 1080×1920 · 30fps · H.264 + AAC · yuv420p 
 4. Click **Render Video** and watch stage progress
 5. Preview / download the final MP4 and SRT
 
-## Motion generation & Kling image-to-video (Phase 6)
+## Motion generation & image-to-video (Phase 6 / 6.1)
 
-Converts completed scene images into short cinematic clips via Kling (or mock mode), with Gemini motion briefs, BullMQ async polling, FFprobe validation, and MinIO persistence.
+Converts completed scene images into short cinematic clips via **MiniMax Hailuo-02** on fal.ai (default) or Kling (optional; disabled until `KLING_ENABLED=true`), with Gemini motion briefs, BullMQ async polling, FFprobe validation, and MinIO persistence. Details: [`docs/PHASE6_1_HAILUO_INTEGRATION_REPORT.md`](docs/PHASE6_1_HAILUO_INTEGRATION_REPORT.md).
 
 ### Configuration
 
 | Variable | Purpose |
 | --- | --- |
-| `KLING_API_KEY` | Official Bearer API key (never hardcode / never expose to React) |
-| `KLING_API_BASE_URL` | Default `https://api-singapore.klingai.com` |
-| `KLING_MODEL` | Default `kling-2.6` (`/image-to-video/kling-2.6`) |
-| `KLING_DEFAULT_DURATION_SECONDS` | `5` or `10` |
-| `KLING_DEFAULT_RESOLUTION` | `720p` or `1080p` |
-| `KLING_POLL_INTERVAL_SECONDS` | Delayed status-check interval |
-| `KLING_MAX_POLL_ATTEMPTS` | Bounded polling attempts |
-| `KLING_MAX_CONCURRENCY` | Worker concurrency for Kling queues |
-| `KLING_PRICE_PER_SECOND_USD` | Configurable estimated cost (not a live price sheet) |
-| `KLING_USE_MOCK` | Force mock async pipeline without paid calls |
-| `KLING_MAX_MONTHLY_SPEND_USD` | Optional monthly estimated-spend guard |
+| `VIDEO_GENERATION_PROVIDER` | Default `hailuo` (`kling` optional) |
+| `FAL_API_KEY` | Shared fal.ai key for Hailuo (and image gen) |
+| `HAILUO_MODEL` | `fal-ai/minimax/hailuo-02/standard/image-to-video` |
+| `HAILUO_DEFAULT_DURATION` / `HAILUO_DEFAULT_RESOLUTION` | `6` / `768P` |
+| `HAILUO_USE_MOCK` | Force mock async pipeline without paid calls |
+| `HAILUO_PRICE_PER_SECOND_768P_USD` | Default `0.045` (~$0.27 for 6s) |
+| `KLING_ENABLED` | Default `false` — Kling remains registered for future use |
+| `KLING_*` | Existing Kling configuration (unchanged) |
 
-Official auth is `Authorization: Bearer <KLING_API_KEY>`. Live Kling integration is only verified when a real key is configured and `KLING_USE_MOCK=false`.
+Live Hailuo requires `FAL_API_KEY` and `HAILUO_USE_MOCK=false`. Live Kling requires `KLING_ENABLED=true`, a real key, and `KLING_USE_MOCK=false`.
 
 ### Motion pipeline
 
 1. Require a completed `SceneVisual` image (reject scenes without images)
 2. Gemini motion analysis → structured brief + editable motion prompt
-3. Submit image-to-video to Kling (task id persisted)
+3. Submit image-to-video to the selected provider (request id persisted)
 4. Delayed BullMQ status polling (does not hold a worker open)
 5. Download completed MP4, validate with FFprobe, store in MinIO
 6. Link `MotionGeneration` → scene + source visual + `MediaAsset`
@@ -269,6 +266,7 @@ Queues: `motion-analysis` → `video-generation` → `video-status-polling` → 
 | `POST /api/scenes/:id/motion/generate` | Generate one scene clip |
 | `POST /api/scenes/:id/motion/regenerate` | New attempt for a scene |
 | `GET /api/scenes/:id/motion` | Scene motion history |
+| `GET /api/motion/providers` | List Hailuo/Kling availability |
 | `GET/PATCH /api/motion/:motionId` | Inspect / edit prompt / select |
 | `POST /api/motion/:motionId/retry\|cancel\|select` | Retry, cancel, select preferred clip |
 | `GET/POST /api/motion-generation/jobs/:jobId` | Inspect / retry / cancel jobs |

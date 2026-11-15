@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { IntegrationsModule } from '../../integrations/integrations.module';
 import { JobsModule } from '../jobs/jobs.module';
 import {
   MotionController,
@@ -9,7 +10,7 @@ import {
 import { MotionService } from './motion.service';
 
 @Module({
-  imports: [JobsModule],
+  imports: [JobsModule, IntegrationsModule],
   controllers: [
     StoryMotionController,
     SceneMotionController,

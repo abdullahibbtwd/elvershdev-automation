@@ -40,11 +40,17 @@ export async function validateVideoBuffer(
   options?: {
     expectedMimeType?: string;
     ffmpeg?: FfmpegService;
+    /** Absolute minimum file size. Real Hailuo/Kling clips are typically MBs. */
     minBytes?: number;
+    /** Reject near-instant placeholder clips (mock MP4s are often ~1s or less). */
+    minDurationSeconds?: number;
+    allowTinyMock?: boolean;
   },
 ): Promise<VideoValidationResult> {
   const mimeType = options?.expectedMimeType || 'video/mp4';
-  const minBytes = options?.minBytes ?? 64;
+  const allowTinyMock = options?.allowTinyMock === true;
+  const minBytes = options?.minBytes ?? (allowTinyMock ? 64 : 50_000);
+  const minDurationSeconds = options?.minDurationSeconds ?? (allowTinyMock ? 0 : 1.5);
   const bytes = Buffer.from(buffer);
   const metadata: ValidatedVideoMetadata = {
     durationSeconds: null,
@@ -63,7 +69,7 @@ export async function validateVideoBuffer(
     return {
       valid: false,
       metadata,
-      errorMessage: `Video file too small (${bytes.length} bytes)`,
+      errorMessage: `Video file too small (${bytes.length} bytes; min ${minBytes}). Likely a mock/placeholder clip.`,
     };
   }
 
@@ -124,6 +130,18 @@ export async function validateVideoBuffer(
         valid: false,
         metadata,
         errorMessage: 'FFprobe could not determine video dimensions',
+      };
+    }
+
+    if (
+      minDurationSeconds > 0 &&
+      metadata.durationSeconds != null &&
+      metadata.durationSeconds < minDurationSeconds
+    ) {
+      return {
+        valid: false,
+        metadata,
+        errorMessage: `Video too short (${metadata.durationSeconds.toFixed(2)}s; min ${minDurationSeconds}s). Likely a mock/placeholder clip.`,
       };
     }
 

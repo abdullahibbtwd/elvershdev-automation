@@ -2,12 +2,16 @@ import { randomUUID } from 'node:crypto';
 import type { Job, Processor } from 'bullmq';
 import { JobStatus, MediaType, MotionGenerationStatus, Prisma } from '@prisma/client';
 import type { MotionDownloadQueuePayload } from '@ai-video/shared';
-import { getKlingTaskStatus, retrieveCompletedKlingVideo, shouldUseKlingMock } from '../lib/kling';
 import type { Logger } from '../lib/logger';
 import { getPrisma } from '../lib/prisma';
 import { deleteObject, uploadObject } from '../lib/storage';
 import { validateVideoBuffer } from '../lib/video-validation';
 import { FfmpegService } from '../lib/ffmpeg';
+import {
+  resolveVideoProvider,
+  resolveVideoProviderId,
+  shouldUseVideoProviderMock,
+} from '../lib/video-providers';
 
 export function createVideoDownloadProcessor(logger: Logger): Processor {
   return async (job: Job<MotionDownloadQueuePayload>) => {
@@ -83,9 +87,14 @@ export function createVideoDownloadProcessor(logger: Logger): Processor {
         });
       }
 
-      const forceMock = data.useMockAi === true || shouldUseKlingMock();
+      const providerId = resolveVideoProviderId(
+        data.provider || motion.provider || process.env.VIDEO_GENERATION_PROVIDER,
+      );
+      const provider = resolveVideoProvider(providerId);
+      const forceMock = data.useMockAi === true || shouldUseVideoProviderMock(providerId);
       if (forceMock) {
-        process.env.KLING_USE_MOCK = 'true';
+        const mockEnvKey = providerId === 'kling' ? 'KLING_USE_MOCK' : 'HAILUO_USE_MOCK';
+        process.env[mockEnvKey] = 'true';
       }
 
       const status =
@@ -101,13 +110,13 @@ export function createVideoDownloadProcessor(logger: Logger): Processor {
               ],
               mock: false,
             }
-          : await getKlingTaskStatus(data.providerTaskId);
+          : await provider.getTaskStatus(data.providerTaskId);
 
       if (status.status !== 'succeeded' || status.outputs.length === 0) {
         throw new Error(status.message || 'Provider video not ready for download');
       }
 
-      const retrieved = await retrieveCompletedKlingVideo(status);
+      const retrieved = await provider.retrieveCompletedVideo(status);
 
       const validating = await prisma.motionGeneration.updateMany({
         where: {
@@ -126,6 +135,8 @@ export function createVideoDownloadProcessor(logger: Logger): Processor {
       const validation = await validateVideoBuffer(retrieved.buffer, {
         expectedMimeType: retrieved.mimeType || 'video/mp4',
         ffmpeg: new FfmpegService(),
+        // Real Hailuo/Kling clips are multi-MB and multi-second; mock stubs are ~3KB/~1s.
+        allowTinyMock: forceMock,
       });
 
       if (!validation.valid) {
@@ -215,15 +226,21 @@ export function createVideoDownloadProcessor(logger: Logger): Processor {
         return { status: 'cancelled' };
       }
 
+      const providerIdForUsage = resolveVideoProviderId(
+        data.provider || motion.provider || process.env.VIDEO_GENERATION_PROVIDER,
+      );
       await prisma.providerUsage.create({
         data: {
           userId: motion.userId,
           storyId: motion.storyId,
           generationJobId: data.generationJobId,
-          provider: 'kling',
-          model: motion.providerModel || 'kling',
+          provider: providerIdForUsage,
+          model: motion.providerModel || providerIdForUsage,
           requestType: 'image_to_video_complete',
-          estimatedCost: motion.estimatedCost ?? new Prisma.Decimal(0),
+          estimatedCost:
+            status.actualCostUsd != null
+              ? new Prisma.Decimal(status.actualCostUsd)
+              : (motion.estimatedCost ?? new Prisma.Decimal(0)),
           metadata: {
             motionGenerationId: motion.id,
             sceneId: motion.sceneId,
@@ -233,6 +250,8 @@ export function createVideoDownloadProcessor(logger: Logger): Processor {
             resolution: motion.resolution,
             fileSize: retrieved.contentLength,
             actualCost: status.actualCostUsd ?? null,
+            estimatedCost: motion.estimatedCost != null ? Number(motion.estimatedCost) : null,
+            costKind: status.actualCostUsd != null ? 'actual' : 'estimated',
             estimated: status.actualCostUsd == null,
           },
         },

@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Select } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { api } from '@/lib/api';
 
@@ -317,8 +318,7 @@ export function PublishRenderDialog({
                   }
                 />
                 {privacyOptions.length > 0 && (
-                  <select
-                    className="h-10 w-full rounded-md border px-3 text-sm"
+                  <Select
                     value={draft.privacyStatus}
                     onChange={(e) =>
                       setDrafts((prev) => ({
@@ -326,13 +326,11 @@ export function PublishRenderDialog({
                         [channel.id]: { ...draft, privacyStatus: e.target.value },
                       }))
                     }
-                  >
-                    {privacyOptions.map((opt) => (
-                      <option key={opt} value={opt}>
-                        Privacy: {opt}
-                      </option>
-                    ))}
-                  </select>
+                    options={privacyOptions.map((opt) => ({
+                      value: opt,
+                      label: `Privacy: ${opt}`,
+                    }))}
+                  />
                 )}
               </div>
             );

@@ -4,11 +4,11 @@ export const AUTOMATION_DEFAULTS = {
   timezone: 'UTC',
   preferredPublishingDays: [1, 2, 3, 4, 5],
   includeWeekends: true,
-  publishingWindowStart: '09:00',
-  publishingWindowEnd: '21:00',
-  minIntervalMinutes: 60,
+  publishingWindowStart: '08:00',
+  publishingWindowEnd: '19:30',
+  minIntervalMinutes: 660,
   maxDailyPublishingAttempts: 20,
-  targetDurationSeconds: 60,
+  targetDurationSeconds: 50,
   language: 'en',
   maxConcurrentGeneration: 2,
   maxConcurrentPublishing: 4,
@@ -22,8 +22,14 @@ export const AUTOMATION_DEFAULTS = {
     TIKTOK: true,
     YOUTUBE: true,
   },
-  contentCategories: ['Narrative', 'Motivation'],
-  storyGenres: ['Cinematic storytelling'],
+  contentCategories: [
+    'Personal growth',
+    'Human emotions',
+    'Unexpected twists',
+    'Kindness and humanity',
+    'Life lessons',
+  ],
+  storyGenres: ['Cinematic short story', 'Emotional narrative', 'Motivational parable'],
 } as const;
 
 export const AUTOMATION_NOTIFICATION_TYPES = {

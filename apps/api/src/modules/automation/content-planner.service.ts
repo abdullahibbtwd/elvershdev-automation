@@ -17,8 +17,11 @@ import {
   addMinutes,
   fingerprintIdea,
   formatDateInTimeZone,
+  DEFAULT_DAILY_SLOTS,
   generateUniqueContentIdeas,
   isPublishingDayAllowed,
+  resolveDailySlot,
+  subtractMinutesFromHm,
   zonedDateTimeToUtc,
   type AutomationDailyPlannerPayload,
 } from '@ai-video/shared';
@@ -294,15 +297,17 @@ export class ContentPlannerService {
     const ideas = generateUniqueContentIdeas({
       count: needed,
       niche: config.storyGenres[0] ?? 'Motivation',
-      audience: config.targetAudience ?? 'General audience',
+      audience: config.targetAudience?.trim() || 'General audience',
       categories: config.contentCategories,
       preferredCategories,
       deprioritizedCategories,
       genres: config.storyGenres,
       themes: config.themes,
-      tone: config.tone ?? 'Inspirational',
+      tone: config.tone?.trim() || 'Inspirational',
       exclusions: config.contentExclusions,
       daySalt: `${planDate}:${userId.slice(0, 8)}`,
+      startingSlotIndex: existingPlans.length,
+      dailySlots: DEFAULT_DAILY_SLOTS,
       recent: recent.map((item) => ({
         title: item.ideaTitle,
         summary: item.ideaSummary,
@@ -381,6 +386,8 @@ export class ContentPlannerService {
       genre: string;
       theme: string;
       topic: string;
+      slotKind?: string;
+      slotLabel?: string;
     };
     autoApprove: boolean;
   }) {
@@ -394,27 +401,36 @@ export class ContentPlannerService {
     }
 
     const fingerprint = fingerprintIdea(input.idea);
-    const windowStart = input.config.publishingWindowStart || '09:00';
-    const generationAt = zonedDateTimeToUtc(
+    const slot = resolveDailySlot(input.slotIndex, DEFAULT_DAILY_SLOTS);
+    const publishHm = slot.publishTime;
+    const generateHm = subtractMinutesFromHm(publishHm, slot.generateLeadMinutes);
+    const publishAt = zonedDateTimeToUtc(
       input.planDate,
-      windowStart,
+      publishHm,
       input.config.timezone,
     );
-    const staggeredGeneration = addMinutes(
-      generationAt,
-      input.slotIndex * input.config.minIntervalMinutes,
+    let staggeredGeneration = zonedDateTimeToUtc(
+      input.planDate,
+      generateHm,
+      input.config.timezone,
     );
-    const publishAt = addMinutes(staggeredGeneration, Math.max(30, input.config.minIntervalMinutes));
+    // If generation would be in the past (manual late plan), start soon.
+    if (staggeredGeneration.getTime() < Date.now() - 60_000) {
+      staggeredGeneration = addMinutes(new Date(), 1 + input.slotIndex * 2);
+    }
 
     const brief = {
       topic: input.idea.topic,
       niche: input.idea.genre,
-      targetAudience: input.config.targetAudience ?? 'General audience',
-      language: input.config.language,
-      tone: input.config.tone ?? 'Inspirational',
+      targetAudience:
+        input.config.targetAudience?.trim() || 'General audience',
+      language: input.config.language?.trim() || 'en',
+      tone: slot.toneHint || input.config.tone?.trim() || 'Inspirational',
       desiredDurationSeconds: input.config.targetDurationSeconds,
       category: input.idea.category,
       additionalInstructions: [
+        `Daily slot: ${slot.label} (publish ${publishHm} ${input.config.timezone}).`,
+        slot.briefInstructions,
         input.config.brandIdentity
           ? `Brand/channel identity: ${input.config.brandIdentity}`
           : null,
@@ -422,6 +438,9 @@ export class ContentPlannerService {
           ? `Avoid: ${input.config.contentExclusions.join(', ')}`
           : null,
         `Theme: ${input.idea.theme}. Genre: ${input.idea.genre}. Summary: ${input.idea.summary}`,
+        'Structure: hook (2–3s) → rising curiosity → emotional/surprising turn → meaningful lesson → soft follow CTA.',
+        'Target 6–9 cinematic photoreal scenes. Narration ~45–55s when duration allows.',
+        'Hashtags: include 8–15 discovery-friendly tags without # (mix niche + emotional + platform discovery).',
       ]
         .filter(Boolean)
         .join('\n'),
@@ -447,6 +466,12 @@ export class ContentPlannerService {
             storyBrief: brief as Prisma.InputJsonValue,
             approvedAt: input.autoApprove ? new Date() : null,
             idempotencyKey,
+            metadata: {
+              slotKind: slot.kind,
+              slotLabel: slot.label,
+              publishTimeLocal: publishHm,
+              generateTimeLocal: generateHm,
+            } as Prisma.InputJsonValue,
           },
         });
 

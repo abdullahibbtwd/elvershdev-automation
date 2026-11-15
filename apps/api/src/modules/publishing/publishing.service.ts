@@ -20,6 +20,7 @@ import {
 import {
   DEFAULT_CAPABILITIES,
   QUEUE_NAMES,
+  buildViralHashtags,
   type PublishingCapabilities,
   type SocialPlatformKey,
   type SocialPublishQueuePayload,
@@ -511,6 +512,36 @@ export class PublishingService {
   }) {
     const { userId, render, channel, fields, idempotencyKey } = input;
 
+    let enrichedHashtags = fields.hashtags ?? [];
+    if (!enrichedHashtags.length) {
+      const story = await this.prisma.story.findUnique({
+        where: { id: render.storyId },
+        select: { title: true, hashtags: true, category: true },
+      });
+      const plan = await this.prisma.contentPlan.findFirst({
+        where: { storyId: render.storyId },
+        orderBy: { createdAt: 'desc' },
+        select: { category: true, theme: true, metadata: true },
+      });
+      const planMeta =
+        plan?.metadata && typeof plan.metadata === 'object' && !Array.isArray(plan.metadata)
+          ? (plan.metadata as Record<string, unknown>)
+          : {};
+      const slotKind =
+        planMeta.slotKind === 'morning' || planMeta.slotKind === 'evening'
+          ? planMeta.slotKind
+          : null;
+      enrichedHashtags = buildViralHashtags({
+        platform: channel.platform,
+        seedTags: story?.hashtags ?? [],
+        category: plan?.category ?? story?.category,
+        theme: plan?.theme,
+        title: fields.title ?? story?.title,
+        slotKind,
+      });
+    }
+    const enrichedFields = { ...fields, hashtags: enrichedHashtags };
+
     const { record, generationJob } = await this.prisma.$transaction(async (tx) => {
       const generationJob = await tx.generationJob.create({
         data: {
@@ -536,11 +567,11 @@ export class PublishingService {
           channelId: channel.id,
           platform: channel.platform,
           status: PublishStatus.QUEUED,
-          title: fields.title ?? null,
-          caption: fields.caption ?? null,
-          description: fields.description ?? null,
-          hashtags: fields.hashtags ?? [],
-          platformSettings: (fields.platformSettings ?? {}) as Prisma.InputJsonValue,
+          title: enrichedFields.title ?? null,
+          caption: enrichedFields.caption ?? null,
+          description: enrichedFields.description ?? null,
+          hashtags: enrichedFields.hashtags ?? [],
+          platformSettings: (enrichedFields.platformSettings ?? {}) as Prisma.InputJsonValue,
           idempotencyKey,
           generationJobId: generationJob.id,
           uploadProgress: 0,

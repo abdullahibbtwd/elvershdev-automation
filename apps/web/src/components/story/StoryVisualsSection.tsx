@@ -10,6 +10,7 @@ import { ImageLightbox, type LightboxImage } from '@/components/story/ImageLight
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Select } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { api } from '@/lib/api';
 import { statusTone } from '@/lib/status';
@@ -524,21 +525,21 @@ export function StoryVisualsSection({
 
         {hasScenes && (
           <div className="flex flex-wrap items-center gap-2">
-            <select
+            <Select
               aria-label="Visual style"
-              className="h-10 rounded-md border border-input bg-card px-3 text-sm"
+              className="w-[220px]"
               value={selectedStyleId}
               disabled={isStoryGenerating || isVisualActive || stylesQuery.isLoading}
               onChange={(e) => setSelectedStyleId(e.target.value)}
-            >
-              {styles.length === 0 && <option value="">Default style</option>}
-              {styles.map((style) => (
-                <option key={style.id} value={style.id}>
-                  {style.name}
-                  {style.isDefault ? ' (Default)' : ''}
-                </option>
-              ))}
-            </select>
+              options={
+                styles.length === 0
+                  ? [{ value: '', label: 'Default style' }]
+                  : styles.map((style) => ({
+                      value: style.id,
+                      label: `${style.name}${style.isDefault ? ' (Default)' : ''}`,
+                    }))
+              }
+            />
             <Button
               disabled={isStoryGenerating || isVisualActive || generateStoryMutation.isPending}
               onClick={handleGenerateAll}

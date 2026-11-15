@@ -7,6 +7,7 @@ import { ErrorState } from '@/components/ErrorState';
 import { LoadingState } from '@/components/LoadingState';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Select } from '@/components/ui/select';
 import { api } from '@/lib/api';
 import { statusTone } from '@/lib/status';
 
@@ -78,32 +79,27 @@ export function JobsPage() {
       </div>
 
       <div className="flex flex-wrap items-center gap-3 rounded-xl border border-border bg-card p-4">
-        <select
-          className="h-10 rounded-md border px-3 text-sm"
+        <Select
+          className="w-[200px]"
           value={jobType}
           onChange={(e) => setJobType(e.target.value as (typeof JOB_TYPES)[number])}
-        >
-          {JOB_TYPES.map((type) => (
-            <option key={type} value={type}>
-              {type}
-            </option>
-          ))}
-        </select>
+          options={JOB_TYPES.map((type) => ({ value: type, label: type }))}
+        />
         <Button onClick={() => createMutation.mutate()} disabled={createMutation.isPending}>
           Queue job
         </Button>
-        <select
-          className="ml-auto h-10 rounded-md border px-3 text-sm"
+        <Select
+          className="ml-auto w-[180px]"
           value={status}
           onChange={(e) => setStatus(e.target.value)}
-        >
-          <option value="">All statuses</option>
-          {['PENDING', 'QUEUED', 'PROCESSING', 'COMPLETED', 'FAILED', 'CANCELLED'].map((s) => (
-            <option key={s} value={s}>
-              {s}
-            </option>
-          ))}
-        </select>
+          options={[
+            { value: '', label: 'All statuses' },
+            ...['PENDING', 'QUEUED', 'PROCESSING', 'COMPLETED', 'FAILED', 'CANCELLED'].map((s) => ({
+              value: s,
+              label: s,
+            })),
+          ]}
+        />
       </div>
 
       {isLoading ? (

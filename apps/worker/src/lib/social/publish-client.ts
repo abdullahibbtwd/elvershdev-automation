@@ -74,111 +74,143 @@ function mockStatus(platform: SocialPlatformKey, postId: string): PublishStatusR
 
 function buildCaption(input: PublishVideoInput): string {
   const base = (input.caption ?? input.description ?? input.title ?? '').trim();
+  const lower = base.toLowerCase();
   const tags = (input.hashtags ?? [])
     .map((t) => t.trim())
     .filter(Boolean)
-    .map((t) => (t.startsWith('#') ? t : `#${t}`));
+    .map((t) => (t.startsWith('#') ? t : `#${t}`))
+    .filter((t) => !lower.includes(t.toLowerCase()));
   if (!tags.length) return base;
   return base ? `${base}\n\n${tags.join(' ')}` : tags.join(' ');
 }
 
-async function publishFacebook(input: PublishVideoInput): Promise<PublishVideoResult> {
+function formatSocialAxiosError(error: unknown): Error {
+  if (!axios.isAxiosError(error)) {
+    return error instanceof Error ? error : new Error(String(error));
+  }
+  const data = error.response?.data as
+    | {
+        error?: { message?: string; code?: number | string; error_user_msg?: string; type?: string };
+        message?: string;
+        code?: string;
+      }
+    | undefined;
+  const metaMessage =
+    data?.error?.error_user_msg || data?.error?.message || data?.message || data?.error?.code;
+  const tiktokMessage =
+    typeof data === 'object' && data && 'error' in data
+      ? (data as { error?: { message?: string; code?: string } }).error?.message ||
+        (data as { error?: { code?: string } }).error?.code
+      : undefined;
+  const detail = metaMessage || tiktokMessage;
+  const status = error.response?.status;
+  const message = detail
+    ? `Social API ${status ?? 'error'}: ${detail}`
+    : error.message;
+  return Object.assign(new Error(message), {
+    code: error.code ?? data?.error?.code ?? data?.code ?? 'SOCIAL_API_ERROR',
+    status,
+    responseData: data,
+  });
+}
+
+async function withSocialErrors<T>(fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch (error) {
+    throw formatSocialAxiosError(error);
+  }
+}
+
+async function resolveFacebookPageAccessToken(
+  pageId: string,
+  accessToken: string,
+): Promise<string> {
+  const version = process.env.FACEBOOK_GRAPH_VERSION ?? 'v22.0';
+  const base = `https://graph.facebook.com/${version}`;
+  // System-user / user tokens often need the Page's own access_token for /videos.
+  const page = await axios.get(`${base}/${pageId}`, {
+    params: { fields: 'id,access_token', access_token: accessToken },
+    validateStatus: () => true,
+  });
+  if (typeof page.data?.access_token === 'string' && page.data.access_token) {
+    return page.data.access_token;
+  }
+  return accessToken;
+}
+
+async function publishFacebookPageVideo(input: PublishVideoInput): Promise<PublishVideoResult> {
   const version = process.env.FACEBOOK_GRAPH_VERSION ?? 'v22.0';
   const base = `https://graph.facebook.com/${version}`;
   const pageId = input.platformAccountId;
   const description = buildCaption(input);
-
-  if (!input.localFilePath) {
-    throw new Error('Facebook Reel publish requires localFilePath');
-  }
-
-  const start = await axios.post(
-    `${base}/${pageId}/video_reels`,
-    null,
-    {
-      params: {
-        upload_phase: 'start',
-        access_token: input.accessToken,
-      },
-    },
+  const pageToken = await resolveFacebookPageAccessToken(pageId, input.accessToken);
+  const { readFile } = await import('node:fs/promises');
+  const bytes = await readFile(input.localFilePath!);
+  const form = new FormData();
+  form.append('description', description);
+  if (input.title) form.append('title', input.title);
+  form.append('published', 'true');
+  form.append(
+    'source',
+    new Blob([bytes], { type: input.mimeType ?? 'video/mp4' }),
+    'video.mp4',
   );
 
-  const videoId = start.data?.video_id as string | undefined;
-  const uploadUrl = start.data?.upload_url as string | undefined;
-  if (!videoId || !uploadUrl) {
-    throw new Error('Facebook video_reels start did not return video_id/upload_url');
-  }
-
-  const { createReadStream } = await import('node:fs');
-  await axios.post(uploadUrl, createReadStream(input.localFilePath), {
-    headers: {
-      Authorization: `OAuth ${input.accessToken}`,
-      offset: '0',
-      file_size: String(input.fileSizeBytes ?? 0),
-      'Content-Type': input.mimeType ?? 'video/mp4',
-    },
+  const uploaded = await axios.post(`${base}/${pageId}/videos`, form, {
+    params: { access_token: pageToken },
     maxBodyLength: Infinity,
     maxContentLength: Infinity,
     timeout: 600_000,
   });
 
-  await axios.post(
-    `${base}/${pageId}/video_reels`,
-    null,
-    {
-      params: {
-        upload_phase: 'finish',
-        video_id: videoId,
-        video_state: 'PUBLISHED',
-        description,
-        title: input.title,
-        access_token: input.accessToken,
-      },
-    },
-  );
+  const videoId = uploaded.data?.id as string | undefined;
+  if (!videoId) {
+    throw new Error('Facebook page video upload did not return an id');
+  }
 
   return {
     phase: 'processing',
     providerUploadId: videoId,
     providerPublishId: videoId,
     providerPostId: videoId,
-    postUrl: `https://www.facebook.com/reel/${videoId}`,
+    postUrl: `https://www.facebook.com/${pageId}/videos/${videoId}`,
     uploadProgress: 100,
     requiresStatusPoll: true,
     pollAfterMs: 5_000,
+    raw: { mode: 'page_videos' },
   };
 }
 
-async function publishInstagram(input: PublishVideoInput): Promise<PublishVideoResult> {
-  const version = process.env.FACEBOOK_GRAPH_VERSION ?? 'v22.0';
-  const base = `https://graph.facebook.com/${version}`;
-  const igId = input.platformAccountId;
-  const caption = buildCaption(input);
+async function publishFacebook(input: PublishVideoInput): Promise<PublishVideoResult> {
+  return withSocialErrors(async () => {
+    const version = process.env.FACEBOOK_GRAPH_VERSION ?? 'v22.0';
+    const base = `https://graph.facebook.com/${version}`;
+    const pageId = input.platformAccountId;
+    const description = buildCaption(input);
 
-  if (input.localFilePath) {
-    const init = await axios.post(
-      `${base}/${igId}/media`,
-      null,
-      {
+    if (!input.localFilePath) {
+      throw new Error('Facebook publish requires localFilePath');
+    }
+
+    // Prefer Reels when the token allows it; otherwise fall back to classic Page videos
+    // (pages_manage_posts) so publish still works without pages_show_list.
+    try {
+      const start = await axios.post(`${base}/${pageId}/video_reels`, null, {
         params: {
-          media_type: 'REELS',
-          upload_type: 'resumable',
-          caption,
+          upload_phase: 'start',
           access_token: input.accessToken,
-          ...(input.platformSettings?.isAiGenerated != null
-            ? { is_ai_generated: Boolean(input.platformSettings.isAiGenerated) }
-            : {}),
         },
-      },
-    );
-    const containerId = init.data?.id as string | undefined;
-    if (!containerId) throw new Error('Instagram resumable init missing container id');
+      });
 
-    const { createReadStream } = await import('node:fs');
-    await axios.post(
-      `https://rupload.facebook.com/ig-api-upload/${containerId}`,
-      createReadStream(input.localFilePath),
-      {
+      const videoId = start.data?.video_id as string | undefined;
+      const uploadUrl = start.data?.upload_url as string | undefined;
+      if (!videoId || !uploadUrl) {
+        throw new Error('Facebook video_reels start did not return video_id/upload_url');
+      }
+
+      const { createReadStream } = await import('node:fs');
+      await axios.post(uploadUrl, createReadStream(input.localFilePath), {
         headers: {
           Authorization: `OAuth ${input.accessToken}`,
           offset: '0',
@@ -188,48 +220,128 @@ async function publishInstagram(input: PublishVideoInput): Promise<PublishVideoR
         maxBodyLength: Infinity,
         maxContentLength: Infinity,
         timeout: 600_000,
-      },
-    );
+      });
 
-    return {
-      phase: 'processing',
-      providerUploadId: containerId,
-      providerPublishId: containerId,
-      uploadProgress: 80,
-      requiresStatusPoll: true,
-      pollAfterMs: 5_000,
-      raw: { awaitingContainer: true },
-    };
-  }
+      await axios.post(`${base}/${pageId}/video_reels`, null, {
+        params: {
+          upload_phase: 'finish',
+          video_id: videoId,
+          video_state: 'PUBLISHED',
+          description,
+          title: input.title,
+          access_token: input.accessToken,
+        },
+      });
 
-  if (!input.mediaUrl) {
-    throw new Error('Instagram publish requires localFilePath or a public mediaUrl');
-  }
+      return {
+        phase: 'processing',
+        providerUploadId: videoId,
+        providerPublishId: videoId,
+        providerPostId: videoId,
+        postUrl: `https://www.facebook.com/reel/${videoId}`,
+        uploadProgress: 100,
+        requiresStatusPoll: true,
+        pollAfterMs: 5_000,
+        raw: { mode: 'video_reels' },
+      };
+    } catch (error) {
+      const message = axios.isAxiosError(error)
+        ? String(error.response?.data?.error?.message ?? error.message)
+        : error instanceof Error
+          ? error.message
+          : String(error);
+      const missingShowList =
+        /pages_show_list/i.test(message) ||
+        (axios.isAxiosError(error) && error.response?.status === 403);
+      if (!missingShowList) throw error;
+      return publishFacebookPageVideo(input);
+    }
+  });
+}
 
-  const container = await axios.post(
-    `${base}/${igId}/media`,
-    null,
-    {
+async function publishInstagram(input: PublishVideoInput): Promise<PublishVideoResult> {
+  return withSocialErrors(async () => {
+    const version = process.env.FACEBOOK_GRAPH_VERSION ?? 'v22.0';
+    const base = `https://graph.facebook.com/${version}`;
+    const igId = input.platformAccountId;
+    const caption = buildCaption(input);
+
+    if (input.localFilePath) {
+      const init = await axios.post(`${base}/${igId}/media`, null, {
+        params: {
+          media_type: 'REELS',
+          upload_type: 'resumable',
+          caption,
+          access_token: input.accessToken,
+          ...(input.platformSettings?.isAiGenerated != null
+            ? { is_ai_generated: Boolean(input.platformSettings.isAiGenerated) }
+            : {}),
+        },
+      });
+      const containerId = init.data?.id as string | undefined;
+      if (!containerId) throw new Error('Instagram resumable init missing container id');
+
+      // Meta returns a versioned rupload URI; prefer that over a hand-built path.
+      const uploadUri =
+        (typeof init.data?.uri === 'string' && init.data.uri) ||
+        `https://rupload.facebook.com/ig-api-upload/${version}/${containerId}`;
+
+      // rupload requires Content-Length + X-Entity-Length (streams omit Content-Length).
+      const { readFile } = await import('node:fs/promises');
+      const bytes = await readFile(input.localFilePath);
+      const fileSize = String(input.fileSizeBytes ?? bytes.length);
+      await axios.post(uploadUri, bytes, {
+        headers: {
+          Authorization: `OAuth ${input.accessToken}`,
+          offset: '0',
+          file_size: fileSize,
+          'Content-Length': fileSize,
+          'X-Entity-Length': fileSize,
+          'X-Entity-Name': 'video.mp4',
+          'X-Entity-Type': input.mimeType ?? 'video/mp4',
+          'Content-Type': 'application/octet-stream',
+        },
+        maxBodyLength: Infinity,
+        maxContentLength: Infinity,
+        timeout: 600_000,
+      });
+
+      return {
+        phase: 'processing',
+        providerUploadId: containerId,
+        providerPublishId: containerId,
+        uploadProgress: 80,
+        requiresStatusPoll: true,
+        pollAfterMs: 5_000,
+        raw: { awaitingContainer: true, uploadUri },
+      };
+    }
+
+    if (!input.mediaUrl) {
+      throw new Error('Instagram publish requires localFilePath or a public mediaUrl');
+    }
+
+    const container = await axios.post(`${base}/${igId}/media`, null, {
       params: {
         media_type: 'REELS',
         video_url: input.mediaUrl,
         caption,
         access_token: input.accessToken,
       },
-    },
-  );
-  const containerId = container.data?.id as string | undefined;
-  if (!containerId) throw new Error('Instagram container creation failed');
+    });
+    const containerId = container.data?.id as string | undefined;
+    if (!containerId) throw new Error('Instagram container creation failed');
 
-  return {
-    phase: 'processing',
-    providerUploadId: containerId,
-    providerPublishId: containerId,
-    uploadProgress: 50,
-    requiresStatusPoll: true,
-    pollAfterMs: 5_000,
-    raw: { awaitingContainer: true },
-  };
+    return {
+      phase: 'processing',
+      providerUploadId: containerId,
+      providerPublishId: containerId,
+      uploadProgress: 50,
+      requiresStatusPoll: true,
+      pollAfterMs: 5_000,
+      raw: { awaitingContainer: true },
+    };
+  });
 }
 
 async function finishInstagramPublish(
@@ -281,6 +393,7 @@ async function finishInstagramPublish(
 }
 
 async function publishTikTok(input: PublishVideoInput): Promise<PublishVideoResult> {
+  return withSocialErrors(async () => {
   if (!input.localFilePath) {
     throw new Error(
       'TikTok Direct Post uses FILE_UPLOAD and requires localFilePath (PULL_FROM_URL needs a verified domain)',
@@ -288,10 +401,33 @@ async function publishTikTok(input: PublishVideoInput): Promise<PublishVideoResu
   }
 
   const audited = truthy(process.env.TIKTOK_AUDITED);
+  const headers = {
+    Authorization: `Bearer ${input.accessToken}`,
+    'Content-Type': 'application/json; charset=UTF-8',
+  };
+
+  // TikTok requires creator_info/query before each Direct Post.
+  const creator = await axios.post(
+    'https://open.tiktokapis.com/v2/post/publish/creator_info/query/',
+    {},
+    { headers },
+  );
+  if (creator.data?.error?.code && creator.data.error.code !== 'ok') {
+    throw new Error(creator.data.error.message || 'TikTok creator_info query failed');
+  }
+  const privacyOptions = Array.isArray(creator.data?.data?.privacy_level_options)
+    ? (creator.data.data.privacy_level_options as string[])
+    : [];
+
   const requestedPrivacy = String(
     input.platformSettings?.privacyStatus ?? (audited ? 'PUBLIC_TO_EVERYONE' : 'SELF_ONLY'),
   );
-  const privacyLevel = audited ? requestedPrivacy : 'SELF_ONLY';
+  let privacyLevel = audited ? requestedPrivacy : 'SELF_ONLY';
+  if (privacyOptions.length > 0 && !privacyOptions.includes(privacyLevel)) {
+    privacyLevel = privacyOptions.includes('SELF_ONLY')
+      ? 'SELF_ONLY'
+      : privacyOptions[0];
+  }
 
   const fileSize = input.fileSizeBytes ?? 0;
   const chunkSize = fileSize < 5 * 1024 * 1024 ? fileSize : Math.min(10 * 1024 * 1024, fileSize);
@@ -320,16 +456,18 @@ async function publishTikTok(input: PublishVideoInput): Promise<PublishVideoResu
         total_chunk_count: totalChunkCount,
       },
     },
-    {
-      headers: {
-        Authorization: `Bearer ${input.accessToken}`,
-        'Content-Type': 'application/json; charset=UTF-8',
-      },
-    },
+    { headers },
   );
 
   if (init.data?.error?.code && init.data.error.code !== 'ok') {
-    throw new Error(init.data.error.message || 'TikTok init failed');
+    const code = String(init.data.error.code);
+    const message = init.data.error.message || 'TikTok init failed';
+    if (code === 'unaudited_client_can_only_post_to_private_accounts') {
+      throw new Error(
+        `${message} (privacy=${privacyLevel}; set TIKTOK_AUDITED=true after TikTok approves video.publish, or keep SELF_ONLY / private account)`,
+      );
+    }
+    throw new Error(`${code}: ${message}`);
   }
 
   const publishId = init.data?.data?.publish_id as string | undefined;
@@ -372,6 +510,7 @@ async function publishTikTok(input: PublishVideoInput): Promise<PublishVideoResu
     pollAfterMs: 5_000,
     raw: { privacyLevel, audited },
   };
+  });
 }
 
 async function publishYouTube(input: PublishVideoInput): Promise<PublishVideoResult> {

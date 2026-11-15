@@ -4,6 +4,7 @@ import { MotionModule } from '../motion/motion.module';
 import { NarrationModule } from '../narration/narration.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { PublishingModule } from '../publishing/publishing.module';
+import { RealtimeModule } from '../realtime/realtime.module';
 import { RenderingModule } from '../rendering/rendering.module';
 import { StoriesModule } from '../stories/stories.module';
 import { VisualsModule } from '../visuals/visuals.module';
@@ -22,6 +23,7 @@ import { ContentPlannerService } from './content-planner.service';
   imports: [
     QueueModule,
     NotificationsModule,
+    RealtimeModule,
     StoriesModule,
     VisualsModule,
     MotionModule,

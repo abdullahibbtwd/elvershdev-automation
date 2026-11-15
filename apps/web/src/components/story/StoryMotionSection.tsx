@@ -8,9 +8,29 @@ import { ErrorState } from '@/components/ErrorState';
 import { LoadingState } from '@/components/LoadingState';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { RadioGroup } from '@/components/ui/radio-group';
 import { Textarea } from '@/components/ui/textarea';
 import { api } from '@/lib/api';
 import { statusTone } from '@/lib/status';
+import { useAuthStore } from '@/stores/auth-store';
+
+export type VideoProviderOption = {
+  id: 'hailuo' | 'kling';
+  displayName: string;
+  default: boolean;
+  enabled: boolean;
+  available: boolean;
+  configured: boolean;
+  mockMode: boolean;
+  model: string;
+  defaultDurationSeconds: number;
+  defaultResolution: string;
+  supportedDurations: number[];
+  supportedResolutions: string[];
+  estimatedCostPerDefaultClipUsd: number;
+  currency: string;
+  unavailableReason?: string;
+};
 
 export type MotionJobSummary = {
   id: string;
@@ -121,9 +141,35 @@ export function StoryMotionSection({
   isStoryGenerating: boolean;
 }) {
   const queryClient = useQueryClient();
+  const user = useAuthStore((s) => s.user);
+  const isAdmin = user?.role === 'ADMIN';
   const [promptDrafts, setPromptDrafts] = useState<Record<string, string>>({});
   const [pendingSceneId, setPendingSceneId] = useState<string | null>(null);
+  const [selectedProvider, setSelectedProvider] = useState<'hailuo' | 'kling'>('hailuo');
   const wasActiveRef = useRef(false);
+
+  const providersQuery = useQuery({
+    queryKey: ['motion-video-providers'],
+    queryFn: async () => {
+      const res = await api.get('/motion/providers');
+      return (res.data.data?.providers ?? []) as VideoProviderOption[];
+    },
+  });
+
+  const activeProvider = useMemo(() => {
+    const providers = providersQuery.data ?? [];
+    const selected = providers.find((p) => p.id === selectedProvider);
+    return selected || providers.find((p) => p.default) || providers[0] || null;
+  }, [providersQuery.data, selectedProvider]);
+
+  useEffect(() => {
+    const providers = providersQuery.data;
+    if (!providers?.length) return;
+    const defaultProvider = providers.find((p) => p.default && p.enabled) || providers.find((p) => p.enabled);
+    if (defaultProvider) {
+      setSelectedProvider(defaultProvider.id);
+    }
+  }, [providersQuery.data]);
 
   const progressQuery = useQuery({
     queryKey: ['story-motion-progress', storyId],
@@ -181,9 +227,11 @@ export function StoryMotionSection({
 
   const generateStoryMutation = useMutation({
     mutationFn: async () => {
+      const provider = activeProvider;
       const res = await api.post(`/stories/${storyId}/motion/generate`, {
-        durationSeconds: 5,
-        resolution: '720p',
+        provider: provider?.id ?? selectedProvider,
+        durationSeconds: provider?.defaultDurationSeconds ?? 6,
+        resolution: provider?.defaultResolution ?? '768P',
       });
       return res.data.data;
     },
@@ -207,9 +255,11 @@ export function StoryMotionSection({
       const path = regenerate
         ? `/scenes/${sceneId}/motion/regenerate`
         : `/scenes/${sceneId}/motion/generate`;
+      const provider = activeProvider;
       const res = await api.post(path, {
-        durationSeconds: 5,
-        resolution: '720p',
+        provider: provider?.id ?? selectedProvider,
+        durationSeconds: provider?.defaultDurationSeconds ?? 6,
+        resolution: provider?.defaultResolution ?? '768P',
         ...(motionPrompt ? { motionPrompt, skipAnalysis: true } : {}),
       });
       return res.data.data;
@@ -321,6 +371,9 @@ export function StoryMotionSection({
           </h2>
           <p className="mt-1 text-sm text-muted-foreground">
             Convert generated scene images into short cinematic video clips.
+            {activeProvider
+              ? ` Default provider: ${activeProvider.displayName}${activeProvider.mockMode ? ' (mock)' : ''}.`
+              : ''}
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -337,11 +390,18 @@ export function StoryMotionSection({
               isStoryGenerating ||
               isActive ||
               generateStoryMutation.isPending ||
-              scenesWithImages === 0
+              scenesWithImages === 0 ||
+              !activeProvider?.enabled
             }
             onClick={() => {
+              const name = activeProvider?.displayName ?? 'video';
+              const est = activeProvider
+                ? ` ~$${activeProvider.estimatedCostPerDefaultClipUsd.toFixed(2)}/clip est.`
+                : '';
               const ok = window.confirm(
-                `Generate motion clips for ${scenesWithImages} scene(s) with source images? This uses Kling video credits (or mock mode).`,
+                `Generate motion clips for ${scenesWithImages} scene(s) with ${name}?${est}${
+                  activeProvider?.mockMode ? ' (mock mode — no paid credits).' : ' This may incur provider costs.'
+                }`,
               );
               if (!ok) return;
               generateStoryMutation.mutate();
@@ -356,6 +416,50 @@ export function StoryMotionSection({
           </Button>
         </div>
       </div>
+
+      {(providersQuery.data?.length ?? 0) > 0 && (
+        <div className="space-y-2 rounded-xl border border-border bg-card p-3">
+          <div className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">
+            Provider
+          </div>
+          <RadioGroup
+            name="motion-provider"
+            value={selectedProvider}
+            orientation="horizontal"
+            options={(providersQuery.data ?? []).map((provider) => {
+              const canSelect =
+                provider.enabled && (isAdmin || provider.default || provider.id === 'hailuo');
+              return {
+                value: provider.id,
+                label: `${provider.displayName}${provider.default ? ' (default)' : ''}${
+                  !provider.enabled ? ' — unavailable' : provider.mockMode ? ' — mock' : ''
+                }`,
+                description: provider.unavailableReason || provider.model,
+                disabled: !canSelect,
+              };
+            })}
+            onChange={(next) => {
+              const provider = (providersQuery.data ?? []).find((item) => item.id === next);
+              if (!provider) return;
+              if (!provider.enabled) {
+                toast.error(provider.unavailableReason || `${provider.displayName} is unavailable`);
+                return;
+              }
+              if (!isAdmin && !provider.default && provider.id !== 'hailuo') {
+                toast.error('Only administrators can switch to optional providers');
+                return;
+              }
+              setSelectedProvider(next as 'hailuo' | 'kling');
+            }}
+          />
+          {activeProvider && (
+            <div className="text-xs text-muted-foreground">
+              {activeProvider.defaultResolution} · {activeProvider.defaultDurationSeconds}s · est. $
+              {activeProvider.estimatedCostPerDefaultClipUsd.toFixed(2)}
+            </div>
+          )}
+        </div>
+      )}
 
       {progress && (
         <div className="rounded-md border border-border bg-secondary/40 px-3 py-2 text-sm text-foreground">
@@ -455,6 +559,9 @@ export function StoryMotionSection({
                 {selected && (
                   <>
                     <span>
+                      {selected.provider || 'provider'} · {selected.providerModel || 'model'}
+                    </span>
+                    <span>
                       {selected.durationSeconds}s · {selected.resolution}
                     </span>
                     {selected.estimatedCost != null && (
@@ -462,7 +569,13 @@ export function StoryMotionSection({
                         est. ${Number(selected.estimatedCost).toFixed(4)} {selected.currency || 'USD'}
                       </span>
                     )}
+                    {selected.actualCost != null && (
+                      <span>
+                        actual ${Number(selected.actualCost).toFixed(4)}
+                      </span>
+                    )}
                     <span>attempt #{selected.attemptNumber}</span>
+                    <span>status {selected.status}</span>
                   </>
                 )}
               </div>
@@ -476,8 +589,13 @@ export function StoryMotionSection({
                       toast.error('Generate a scene image first');
                       return;
                     }
+                    const name = activeProvider?.displayName ?? 'video provider';
                     const ok = window.confirm(
-                      `Generate motion for scene ${scene.sceneNumber}? This may incur Kling costs.`,
+                      `Generate motion for scene ${scene.sceneNumber} with ${name}?${
+                        activeProvider?.mockMode
+                          ? ' (mock mode)'
+                          : ' This may incur provider costs.'
+                      }`,
                     );
                     if (!ok) return;
                     generateSceneMutation.mutate({

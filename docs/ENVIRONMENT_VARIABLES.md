@@ -206,6 +206,19 @@ The SMTP client is a small built-in implementation (no nodemailer). **No test em
 
 | Variable | Req? | Default | Notes |
 | --- | --- | --- | --- |
+| `VIDEO_GENERATION_PROVIDER` | Optional | `hailuo` | Default video provider (`hailuo` or `kling`). |
+| `HAILUO_ENABLED` | Optional | `true` | Set `false` to disable Hailuo selection. |
+| `HAILUO_MODEL` | Optional | `fal-ai/minimax/hailuo-02/standard/image-to-video` | fal.ai endpoint id. Reuses `FAL_API_KEY`. |
+| `HAILUO_DEFAULT_RESOLUTION` | Optional | `768P` | `512P` or `768P`. |
+| `HAILUO_DEFAULT_DURATION` | Optional | `6` | `6` or `10`. |
+| `HAILUO_PROMPT_OPTIMIZER` | Optional | `true` | |
+| `HAILUO_MAX_RETRIES` / `HAILUO_TIMEOUT_MS` | Optional | `2` / `600000` | |
+| `HAILUO_USE_MOCK` | Optional | code/example `true` | Force mock without fal credits. |
+| `HAILUO_POLL_INTERVAL_SECONDS` / `HAILUO_MAX_POLL_ATTEMPTS` | Optional | `15` / `80` | |
+| `HAILUO_PRICE_PER_SECOND_768P_USD` / `HAILUO_PRICE_PER_SECOND_512P_USD` | Optional | `0.045` / `0.017` | Estimates (~$0.27 for 6s 768P). |
+| `HAILUO_CURRENCY` | Optional | `USD` | |
+| `HAILUO_MAX_MONTHLY_SPEND_USD` | Optional | empty (disabled) | Recommended before live mode. |
+| `KLING_ENABLED` | Optional | `false` | Kling stays registered; enable explicitly for future use. |
 | `KLING_API_KEY` | **Required\*** | empty | Bearer key. Falls back to `KLING_ACCESS_KEY` for compatibility. |
 | `KLING_ACCESS_KEY`, `KLING_SECRET_KEY`, `KLING_API_SECRET` | Optional (legacy) | empty | Legacy names. |
 | `KLING_USE_MOCK` | Optional | code `false`; **example `true`** | |
@@ -215,7 +228,7 @@ The SMTP client is a small built-in implementation (no nodemailer). **No test em
 | `KLING_DEFAULT_RESOLUTION` | Optional | `720p` | `720p` or `1080p`. |
 | `KLING_TIMEOUT_MS` / `KLING_MAX_RETRIES` | Optional | `120000` / `3` | |
 | `KLING_POLL_INTERVAL_SECONDS` / `KLING_MAX_POLL_ATTEMPTS` | Optional | `8` / `90` | |
-| `KLING_MAX_CONCURRENCY` | Optional | `2` | |
+| `KLING_MAX_CONCURRENCY` | Optional | `2` | Shared video-generation queue concurrency. |
 | `KLING_PRICE_PER_SECOND_USD` / `KLING_CURRENCY` | Optional | `0.07` / `USD` | Estimates. |
 | `KLING_MOCK_READY_AFTER_MS` | Optional | `1500` | Mock only. |
 | `KLING_MAX_CLIPS_PER_SCENE` / `KLING_MAX_ATTEMPTS_PER_SCENE` | Optional | `10` / `20` | |
