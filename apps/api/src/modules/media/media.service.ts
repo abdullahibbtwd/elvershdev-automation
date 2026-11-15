@@ -6,11 +6,11 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { MediaType, Prisma } from '@prisma/client';
-import { verifySignedMediaContent } from '@ai-video/shared';
 import { randomUUID } from 'node:crypto';
 import type { Readable } from 'node:stream';
 import { getPagination, paginationMeta } from '../../common/utils/pagination';
 import { PrismaService } from '../../prisma/prisma.service';
+import { verifySignedMediaContent } from '../../storage/signed-media-url';
 import { StorageService } from '../../storage/storage.service';
 import { ProjectsService } from '../projects/projects.service';
 import { ALL_ALLOWED_MIME_TYPES, MAX_UPLOAD_BYTES } from './media.constants';

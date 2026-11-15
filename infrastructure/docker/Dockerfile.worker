@@ -8,25 +8,27 @@ WORKDIR /app
 FROM base AS deps
 # Coolify injects ARG NODE_ENV=production into every stage; that makes pnpm
 # skip typescript and breaks the shared/worker builds below.
+ARG NODE_ENV=development
 ENV NODE_ENV=development
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml* turbo.json ./
 COPY packages/config/package.json packages/config/
 COPY packages/shared/package.json packages/shared/
 COPY apps/worker/package.json apps/worker/
 COPY apps/api/package.json apps/api/
-RUN pnpm install --frozen-lockfile=false --prod=false
+RUN NODE_ENV=development pnpm install --frozen-lockfile=false --prod=false
 
 FROM deps AS build
+ARG NODE_ENV=development
 ENV NODE_ENV=development
 COPY packages ./packages
 COPY apps/worker ./apps/worker
 COPY apps/api/prisma ./apps/api/prisma
 COPY apps/api/prisma.config.ts ./apps/api/prisma.config.ts
-RUN pnpm --filter @ai-video/shared build
+RUN NODE_ENV=development pnpm --filter @ai-video/shared build
 WORKDIR /app/apps/api
-RUN pnpm exec prisma generate
+RUN NODE_ENV=development pnpm exec prisma generate
 WORKDIR /app
-RUN pnpm --filter @ai-video/worker build
+RUN NODE_ENV=development pnpm --filter @ai-video/worker build
 
 FROM node:20-bookworm-slim AS runner
 RUN apt-get update \

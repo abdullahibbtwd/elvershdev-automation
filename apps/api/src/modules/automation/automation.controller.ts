@@ -109,13 +109,42 @@ export class AutomationController {
       targetDurationSeconds: 30,
     });
     const stamp = new Date().toISOString();
+    // Rotate prompts so repeated Live E2E clicks don't produce near-identical stories.
+    const seeds = [
+      {
+        topic: 'A lighthouse keeper who receives a mysterious signal from the sea',
+        theme: 'mystery',
+        genre: 'Cinematic storytelling',
+      },
+      {
+        topic: 'A street musician in Lagos who discovers their melody can pause time for strangers',
+        theme: 'wonder',
+        genre: 'Magical realism',
+      },
+      {
+        topic: 'An astronaut on a lonely outpost who befriends a drifting seed from Earth',
+        theme: 'hope',
+        genre: 'Soft sci-fi',
+      },
+      {
+        topic: 'A taxi driver who keeps picking up the same passenger from different years',
+        theme: 'destiny',
+        genre: 'Urban fantasy',
+      },
+      {
+        topic: 'A young potter whose unfinished vase starts whispering forgotten family secrets',
+        theme: 'heritage',
+        genre: 'Folktale drama',
+      },
+    ] as const;
+    const seed = seeds[Math.floor(Math.random() * seeds.length)]!;
     const plan = await this.planner.createManualPlan(user.id, {
       ideaTitle: `Live E2E ${stamp}`,
       ideaSummary:
         'Live end-to-end test: plan → generate → render → publish to connected channels.',
-      topic: `A short cinematic tale of a lighthouse keeper who receives a mysterious signal from the sea (${stamp})`,
-      theme: 'mystery',
-      genre: 'Cinematic storytelling',
+      topic: `${seed.topic} (${stamp})`,
+      theme: seed.theme,
+      genre: seed.genre,
       category: 'Narrative',
     });
     const scheduleId = plan.schedule?.id;
