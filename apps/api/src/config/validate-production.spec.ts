@@ -39,6 +39,15 @@ describe('validateProductionConfig', () => {
     ).toThrow(/insecure/i);
   });
 
+  it('allows secrets that merely contain the word secret', () => {
+    expect(() =>
+      validateProductionConfig({
+        ...base,
+        JWT_ACCESS_SECRET: 'my_super_secret_key_with_32_chars_ok',
+      }),
+    ).not.toThrow();
+  });
+
   it('rejects minioadmin defaults', () => {
     expect(() =>
       validateProductionConfig({

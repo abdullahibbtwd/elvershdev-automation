@@ -13,7 +13,13 @@ import { getProcessRole, shouldServeHttp } from './common/process-role';
 import { validateProductionConfig } from './config/validate-production';
 
 async function bootstrap() {
-  validateProductionConfig();
+  try {
+    validateProductionConfig();
+  } catch (error) {
+    // Ensure Coolify/docker logs show the real reason the process exits.
+    console.error('[bootstrap] production config validation failed:', (error as Error).message);
+    throw error;
+  }
 
   const processRole = getProcessRole();
   const app = await NestFactory.create(AppModule, { bufferLogs: true });

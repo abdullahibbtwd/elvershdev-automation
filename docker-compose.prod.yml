@@ -125,14 +125,8 @@ services:
       PUBLIC_API_URL: ${PUBLIC_API_URL}
       TRUST_PROXY: "true"
       SWAGGER_ENABLED: ${SWAGGER_ENABLED:-false}
-    # Fresh Postgres has no schema until migrate runs (Coolify has no deploy.sh).
-    command:
-      [
-        "sh",
-        "-c",
-        "pnpm exec prisma migrate deploy && exec node dist/main.js",
-      ]
     # Coolify proxy joins the compose network; Caddy (profile vps) is for bare VPS.
+    # Migrations run in /api-entrypoint.sh (image ENTRYPOINT).
     expose:
       - "3000"
     depends_on:

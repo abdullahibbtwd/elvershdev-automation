@@ -27,10 +27,13 @@ export function validateProductionConfig(env: NodeJS.ProcessEnv = process.env): 
   }
 
   const insecure: string[] = [];
+  // Only flag obvious placeholders — do NOT match the substring "secret"/"password"
+  // (real secrets often contain those words and would crash every deploy).
+  const placeholderRe = /change-me|changeme|replace[_-]?with|^secret$|^password$|^example$/i;
   for (const key of ['JWT_ACCESS_SECRET', 'JWT_REFRESH_SECRET', 'CREDENTIALS_ENCRYPTION_KEY'] as const) {
     const value = env[key] ?? '';
     if (value.length < 32) insecure.push(`${key} (min 32 chars)`);
-    if (/change-me|changeme|secret|password|example/i.test(value)) {
+    if (placeholderRe.test(value)) {
       insecure.push(`${key} (placeholder value)`);
     }
   }
