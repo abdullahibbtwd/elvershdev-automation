@@ -10,7 +10,10 @@ import type { Request, Response, NextFunction } from 'express';
 import { Logger } from 'nestjs-pino';
 import { AppModule } from './app.module';
 import { getProcessRole, shouldServeHttp } from './common/process-role';
+import { installBigIntJson } from './common/utils/json-safe';
 import { validateProductionConfig } from './config/validate-production';
+
+installBigIntJson();
 
 async function bootstrap() {
   try {

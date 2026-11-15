@@ -1,6 +1,7 @@
 import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { jsonSafe } from '../../common/utils/json-safe';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { AnalyticsCostService } from './analytics-cost.service';
 import { AnalyticsInsightsService } from './analytics-insights.service';
@@ -26,33 +27,33 @@ export class AnalyticsController {
 
   @Get('overview')
   async overview(@CurrentUser() user: AuthenticatedUser, @Query() query: AnalyticsRangeDto) {
-    return { success: true, data: await this.analytics.overview(user.id, query) };
+    return { success: true, data: jsonSafe(await this.analytics.overview(user.id, query)) };
   }
 
   @Get('trends')
   async trends(@CurrentUser() user: AuthenticatedUser, @Query() query: AnalyticsRangeDto) {
-    return { success: true, data: await this.analytics.trends(user.id, query) };
+    return { success: true, data: jsonSafe(await this.analytics.trends(user.id, query)) };
   }
 
   @Get('platforms')
   async platforms(@CurrentUser() user: AuthenticatedUser, @Query() query: AnalyticsRangeDto) {
-    return { success: true, data: await this.analytics.platforms(user.id, query) };
+    return { success: true, data: jsonSafe(await this.analytics.platforms(user.id, query)) };
   }
 
   @Get('content')
   async content(@CurrentUser() user: AuthenticatedUser, @Query() query: AnalyticsListDto) {
     const result = await this.analytics.content(user.id, query);
-    return { success: true, data: result.items, meta: result.meta };
+    return { success: true, data: jsonSafe(result.items), meta: result.meta };
   }
 
   @Get('videos/:videoId')
   async video(@CurrentUser() user: AuthenticatedUser, @Param('videoId', ParseUUIDPipe) id: string) {
-    return { success: true, data: await this.analytics.video(user.id, id) };
+    return { success: true, data: jsonSafe(await this.analytics.video(user.id, id)) };
   }
 
   @Get('videos/:videoId/platforms')
   async videoPlatforms(@CurrentUser() user: AuthenticatedUser, @Param('videoId', ParseUUIDPipe) id: string) {
-    return { success: true, data: await this.analytics.videoPlatforms(user.id, id) };
+    return { success: true, data: jsonSafe(await this.analytics.videoPlatforms(user.id, id)) };
   }
 
   @Post('sync')
@@ -72,22 +73,22 @@ export class AnalyticsController {
 
   @Get('costs')
   async costSummary(@CurrentUser() user: AuthenticatedUser, @Query() query: AnalyticsRangeDto) {
-    return { success: true, data: await this.analytics.costsSummary(user.id, query) };
+    return { success: true, data: jsonSafe(await this.analytics.costsSummary(user.id, query)) };
   }
 
   @Get('costs/providers')
   async costProviders(@CurrentUser() user: AuthenticatedUser, @Query() query: AnalyticsRangeDto) {
-    return { success: true, data: await this.analytics.costsProviders(user.id, query) };
+    return { success: true, data: jsonSafe(await this.analytics.costsProviders(user.id, query)) };
   }
 
   @Get('costs/videos')
   async costVideos(@CurrentUser() user: AuthenticatedUser, @Query() query: AnalyticsRangeDto) {
-    return { success: true, data: await this.analytics.costsVideos(user.id, query) };
+    return { success: true, data: jsonSafe(await this.analytics.costsVideos(user.id, query)) };
   }
 
   @Get('costs/projection')
   async projection(@CurrentUser() user: AuthenticatedUser) {
-    return { success: true, data: await this.costs.projection(user.id) };
+    return { success: true, data: jsonSafe(await this.costs.projection(user.id)) };
   }
 
   @Get('insights')
