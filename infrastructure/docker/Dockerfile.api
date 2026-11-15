@@ -35,11 +35,13 @@ COPY --from=build --chown=aivideo:aivideo /app/package.json /app/pnpm-workspace.
 COPY --from=build --chown=aivideo:aivideo /app/node_modules ./node_modules
 COPY --from=build --chown=aivideo:aivideo /app/packages ./packages
 COPY --from=build --chown=aivideo:aivideo /app/apps/api ./apps/api
-COPY --chmod=755 infrastructure/docker/api-entrypoint.sh /api-entrypoint.sh
+COPY infrastructure/docker/api-entrypoint.sh /api-entrypoint.sh
+RUN chmod 755 /api-entrypoint.sh && chown aivideo:aivideo /api-entrypoint.sh
 
 USER aivideo
 WORKDIR /app/apps/api
 EXPOSE 3000
-HEALTHCHECK --interval=30s --timeout=5s --start-period=90s --retries=3 \
+HEALTHCHECK --interval=15s --timeout=5s --start-period=120s --retries=8 \
   CMD curl -fsS http://127.0.0.1:3000/api/health/live || exit 1
-ENTRYPOINT ["/api-entrypoint.sh"]
+# Invoke via sh so a missing +x bit never silently kills the container.
+ENTRYPOINT ["sh", "/api-entrypoint.sh"]

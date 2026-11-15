@@ -111,7 +111,11 @@ services:
     environment:
       NODE_ENV: production
       PROCESS_ROLE: api
-      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=public&connection_limit=20
+      # Entrypoint rebuilds DATABASE_URL from POSTGRES_* with proper URL-encoding.
+      DATABASE_URL: ${DATABASE_URL:-}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
       REDIS_HOST: redis
       REDIS_PORT: 6379
       REDIS_PASSWORD: ${REDIS_PASSWORD}
@@ -138,10 +142,10 @@ services:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:3000/api/health/live"]
-      interval: 30s
+      interval: 15s
       timeout: 5s
-      retries: 5
-      start_period: 90s
+      retries: 8
+      start_period: 120s
     networks:
       - aivideo_internal
     deploy:
@@ -170,7 +174,10 @@ services:
       NODE_ENV: production
       PROCESS_ROLE: scheduler
       PORT: 3001
-      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=public&connection_limit=10
+      DATABASE_URL: ${DATABASE_URL:-}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
       REDIS_HOST: redis
       REDIS_PORT: 6379
       REDIS_PASSWORD: ${REDIS_PASSWORD}
@@ -192,7 +199,8 @@ services:
       minio:
         condition: service_healthy
       api:
-        condition: service_healthy
+        # Don't block whole Coolify deploy on api health — keeps Runtime Logs visible.
+        condition: service_started
     healthcheck:
       test: ["CMD-SHELL", "pgrep -f 'node' >/dev/null || exit 1"]
       interval: 30s
@@ -228,7 +236,11 @@ services:
         required: false
     environment:
       NODE_ENV: production
-      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=public&connection_limit=10
+      # Must use host `postgres` (URL-encode special chars in the password).
+      DATABASE_URL: ${DATABASE_URL}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
       REDIS_HOST: redis
       REDIS_PORT: 6379
       REDIS_PASSWORD: ${REDIS_PASSWORD}
@@ -278,7 +290,9 @@ services:
       - "8080"
     depends_on:
       api:
-        condition: service_healthy
+        # service_started so a crashing api does not abort the whole Coolify deploy
+        # before Runtime Logs are available.
+        condition: service_started
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
       interval: 30s
