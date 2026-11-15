@@ -6,6 +6,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
 import { AlertsService } from './alerts.service';
 import { CleanupService } from './cleanup.service';
 import { EmergencyStopService } from './emergency-stop.service';
+import { MediaRetentionService } from './media-retention.service';
 import { OpsMonitorCron } from './ops-monitor.cron';
 import { OpsBootstrapController, OpsController } from './ops.controller';
 import { OpsService } from './ops.service';
@@ -20,10 +21,17 @@ import { TokenMaintenanceCron } from './token-maintenance.cron';
     AlertsService,
     SmtpService,
     CleanupService,
+    MediaRetentionService,
     EmergencyStopService,
     OpsMonitorCron,
     TokenMaintenanceCron,
   ],
-  exports: [OpsService, AlertsService, CleanupService, EmergencyStopService],
+  exports: [
+    OpsService,
+    AlertsService,
+    CleanupService,
+    MediaRetentionService,
+    EmergencyStopService,
+  ],
 })
 export class OpsModule {}

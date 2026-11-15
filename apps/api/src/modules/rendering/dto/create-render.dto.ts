@@ -53,10 +53,10 @@ class SubtitleStyleDto {
   @Max(8)
   shadow?: number;
 
-  @ApiPropertyOptional({ enum: ['bottom', 'center', 'top'] })
+  @ApiPropertyOptional({ enum: ['bottom', 'center', 'top', 'lower'] })
   @IsOptional()
-  @IsIn(['bottom', 'center', 'top'])
-  alignment?: 'bottom' | 'center' | 'top';
+  @IsIn(['bottom', 'center', 'top', 'lower'])
+  alignment?: 'bottom' | 'center' | 'top' | 'lower';
 
   @ApiPropertyOptional()
   @IsOptional()

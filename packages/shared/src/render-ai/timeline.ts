@@ -181,7 +181,12 @@ export function hexToAssColor(hex: string, alpha = 0): string {
 }
 
 export function buildAss(cues: SubtitleCue[], style: SubtitleStyle, playResX: number, playResY: number): string {
-  const alignmentMap = { bottom: 2, center: 5, top: 8 } as const;
+  // ASS: 2=bottom, 5=center, 8=top. `lower` uses bottom + MarginV ≈ 25% of height (≈ 3/4 frame).
+  const alignmentMap = { bottom: 2, center: 5, top: 8, lower: 2 } as const;
+  const marginV =
+    style.alignment === 'lower'
+      ? Math.max(0, Math.round(playResY * 0.25 - style.fontSize * 0.5))
+      : style.marginV;
   const primary = hexToAssColor(style.primaryColor, 0);
   const outline = hexToAssColor(style.outlineColor, 0);
   const back = hexToAssColor('#000000', style.backgroundBox ? 1 - style.backgroundOpacity : 1);
@@ -195,7 +200,7 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,${style.font},${style.fontSize},${primary},${primary},${outline},${back},0,0,0,0,100,100,0,0,${style.backgroundBox ? 3 : 1},${style.outlineWidth},${style.shadow},${alignmentMap[style.alignment]},60,60,${style.marginV},1
+Style: Default,${style.font},${style.fontSize},${primary},${primary},${outline},${back},0,0,0,0,100,100,0,0,${style.backgroundBox ? 3 : 1},${style.outlineWidth},${style.shadow},${alignmentMap[style.alignment]},60,60,${marginV},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text

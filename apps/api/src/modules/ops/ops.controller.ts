@@ -16,6 +16,7 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { AlertsService } from './alerts.service';
 import { CleanupService } from './cleanup.service';
+import { MediaRetentionService } from './media-retention.service';
 import { EmergencyStopService } from './emergency-stop.service';
 import { OpsService } from './ops.service';
 
@@ -73,6 +74,7 @@ export class OpsController {
     private readonly ops: OpsService,
     private readonly alerts: AlertsService,
     private readonly cleanup: CleanupService,
+    private readonly mediaRetention: MediaRetentionService,
     private readonly emergencyStop: EmergencyStopService,
   ) {}
 
@@ -183,6 +185,17 @@ export class OpsController {
       };
     }
     return { success: true, data: await this.cleanup.cleanupTemporaryArtifacts() };
+  }
+
+  @Post('cleanup/media-retention')
+  async cleanupMediaRetention(@Body() dto: ConfirmDto) {
+    if (dto.confirm !== 'CLEANUP') {
+      return {
+        success: false,
+        error: { code: 'CONFIRMATION_REQUIRED', message: 'Send { "confirm": "CLEANUP" }' },
+      };
+    }
+    return { success: true, data: await this.mediaRetention.runRetentionPass() };
   }
 
   @Post('promote-admin')

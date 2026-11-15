@@ -8,7 +8,8 @@ export const subtitleStyleSchema = z.object({
   outlineColor: z.string().min(3).max(20).default('#000000'),
   outlineWidth: z.number().min(0).max(8).default(2.5),
   shadow: z.number().min(0).max(8).default(1),
-  alignment: z.enum(['bottom', 'center', 'top']).default('bottom'),
+  // `lower` ≈ 3/4 down the frame (below center, above classic bottom).
+  alignment: z.enum(['bottom', 'center', 'top', 'lower']).default('lower'),
   marginV: z.number().int().min(0).max(800).default(160),
   maxLines: z.number().int().min(1).max(4).default(2),
   maxCharsPerLine: z.number().int().min(12).max(80).default(36),

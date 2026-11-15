@@ -91,5 +91,8 @@ describe('Phase 8 timeline planner', () => {
     expect(srt).toContain('-->');
     const ass = buildAss(cues, style, 1080, 1920);
     expect(ass).toContain('[Events]');
+    expect(style.alignment).toBe('lower');
+    // ~25% from bottom for 1920p ≈ 3/4 frame position
+    expect(ass).toMatch(/,2,60,60,456,/);
   });
 });

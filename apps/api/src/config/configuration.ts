@@ -166,6 +166,11 @@ export default () => ({
     workerHealthPort: parseInt(process.env.WORKER_HEALTH_PORT ?? '3101', 10),
     workerHealthHost: process.env.WORKER_HEALTH_HOST ?? 'worker',
     tempCleanupMaxAgeHours: parseInt(process.env.TEMP_CLEANUP_MAX_AGE_HOURS ?? '24', 10),
+    mediaIntermediateRetentionHours: parseInt(
+      process.env.MEDIA_INTERMEDIATE_RETENTION_HOURS ?? '24',
+      10,
+    ),
+    mediaFinalRetentionDays: parseInt(process.env.MEDIA_FINAL_RETENTION_DAYS ?? '7', 10),
     diskUsageAlertPercent: parseInt(process.env.DISK_USAGE_ALERT_PERCENT ?? '85', 10),
     memoryAlertPercent: parseInt(process.env.MEMORY_ALERT_PERCENT ?? '90', 10),
     queueBacklogAlertThreshold: parseInt(process.env.QUEUE_BACKLOG_ALERT_THRESHOLD ?? '100', 10),

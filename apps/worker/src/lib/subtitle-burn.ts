@@ -40,6 +40,10 @@ function yForAlignment(
   const blockHeight = lineCount * fontSize * 1.25;
   if (alignment === 'top') return Math.max(fontSize, marginV);
   if (alignment === 'center') return Math.round((height - blockHeight) / 2);
+  // Lower third-ish: center the cue block around 75% of frame height.
+  if (alignment === 'lower') {
+    return Math.max(fontSize, Math.round(height * 0.75 - blockHeight / 2));
+  }
   return Math.max(fontSize, height - marginV - blockHeight);
 }
 
