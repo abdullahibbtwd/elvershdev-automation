@@ -162,7 +162,10 @@ export function createScenePlanningProcessor(logger: Logger): Processor {
           })),
         });
 
-        if (characters.length > 0) {
+        // Series episode production projects locked SeriesCharacter snapshots into the Story.
+        // Never wipe those profiles (and their CharacterVisualReference links) on scene regen.
+        const preserveCharacters = payload.preserveCharacters === true;
+        if (characters.length > 0 && !preserveCharacters) {
           await tx.characterProfile.deleteMany({ where: { storyId } });
           await tx.characterProfile.createMany({
             data: characters.map((character) => ({

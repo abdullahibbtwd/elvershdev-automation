@@ -17,7 +17,12 @@ import { OverviewPage } from './pages/OverviewPage';
 import { ProjectDetailPage } from './pages/ProjectDetailPage';
 import { ProjectsPage } from './pages/ProjectsPage';
 import { PublishingPage } from './pages/PublishingPage';
-import { RegisterPage } from './pages/RegisterPage';
+import { SeriesCharactersPage } from './pages/SeriesCharactersPage';
+import { SeriesDetailPage } from './pages/SeriesDetailPage';
+import { SeriesEpisodePage } from './pages/SeriesEpisodePage';
+import { SeriesLibraryPage } from './pages/SeriesLibraryPage';
+import { SeriesOverviewPage } from './pages/SeriesOverviewPage';
+import { SeriesSettingsPage } from './pages/SeriesSettingsPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { StoriesPage } from './pages/StoriesPage';
 import { StoryCreatePage } from './pages/StoryCreatePage';
@@ -28,7 +33,7 @@ export function App() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
-      <Route path="/register" element={<RegisterPage />} />
+      <Route path="/register" element={<Navigate to="/login" replace />} />
       <Route
         element={
           <ProtectedRoute>
@@ -50,6 +55,12 @@ export function App() {
         <Route path="/automation/calendar" element={<AutomationCalendarPage />} />
         <Route path="/automation/settings" element={<AutomationSettingsPage />} />
         <Route path="/automation/executions" element={<AutomationExecutionsPage />} />
+        <Route path="/series" element={<SeriesOverviewPage />} />
+        <Route path="/series/library" element={<SeriesLibraryPage />} />
+        <Route path="/series/settings" element={<SeriesSettingsPage />} />
+        <Route path="/series/:id" element={<SeriesDetailPage />} />
+        <Route path="/series/:id/characters" element={<SeriesCharactersPage />} />
+        <Route path="/series/:id/episodes/:episodeId" element={<SeriesEpisodePage />} />
         <Route path="/analytics" element={<AnalyticsOverviewPage />} />
         <Route path="/analytics/videos/:videoId" element={<AnalyticsVideoDetailPage />} />
         <Route path="/analytics/costs" element={<AnalyticsCostsPage />} />

@@ -33,6 +33,15 @@ export const QUEUE_NAMES = {
   ANALYTICS_POST_REFRESH: 'analytics-post-refresh',
   ANALYTICS_ACCOUNT_REFRESH: 'analytics-account-refresh',
   ANALYTICS_AGGREGATION: 'analytics-aggregation',
+  /** Series Studio planning / orchestration (API-hosted Nest DI) */
+  SERIES_STORY_PLANNING: 'series-story-planning',
+  SERIES_CHARACTER_GENERATION: 'series-character-generation',
+  SERIES_EPISODE_PLANNING: 'series-episode-planning',
+  SERIES_EPISODE_PRODUCTION: 'series-episode-production',
+  SERIES_CONTINUITY_VALIDATION: 'series-continuity-validation',
+  SERIES_REPLACEMENT_PLANNING: 'series-replacement-planning',
+  SERIES_PUBLISHING: 'series-publishing',
+  SERIES_MAINTENANCE: 'series-maintenance',
 } as const;
 
 export type QueueName = (typeof QUEUE_NAMES)[keyof typeof QUEUE_NAMES];
@@ -66,6 +75,14 @@ export const ALL_QUEUE_NAMES = [
   QUEUE_NAMES.ANALYTICS_POST_REFRESH,
   QUEUE_NAMES.ANALYTICS_ACCOUNT_REFRESH,
   QUEUE_NAMES.ANALYTICS_AGGREGATION,
+  QUEUE_NAMES.SERIES_STORY_PLANNING,
+  QUEUE_NAMES.SERIES_CHARACTER_GENERATION,
+  QUEUE_NAMES.SERIES_EPISODE_PLANNING,
+  QUEUE_NAMES.SERIES_EPISODE_PRODUCTION,
+  QUEUE_NAMES.SERIES_CONTINUITY_VALIDATION,
+  QUEUE_NAMES.SERIES_REPLACEMENT_PLANNING,
+  QUEUE_NAMES.SERIES_PUBLISHING,
+  QUEUE_NAMES.SERIES_MAINTENANCE,
 ] as const;
 
 export const JOB_TYPE_TO_QUEUE = {
@@ -279,4 +296,89 @@ export interface AnalyticsAggregationPayload {
   dateFrom?: string;
   dateTo?: string;
   force?: boolean;
+}
+
+export type SeriesPlannerMode = 'plan_movie' | 'recover' | 'manual';
+
+export interface SeriesStoryPlanningPayload {
+  userId: string;
+  laneId: string;
+  seriesId?: string;
+  replacementPlanId?: string;
+  mode: SeriesPlannerMode;
+  useMockAi?: boolean;
+  force?: boolean;
+}
+
+export interface SeriesCharacterGenerationPayload {
+  userId: string;
+  seriesId: string;
+  characterId?: string;
+  useMockAi?: boolean;
+  force?: boolean;
+}
+
+export interface SeriesEpisodePlanningPayload {
+  userId: string;
+  seriesId: string;
+  episodeId: string;
+  useMockAi?: boolean;
+  force?: boolean;
+}
+
+export type SeriesEpisodeProductionAction =
+  | 'start'
+  | 'advance'
+  | 'retry'
+  | 'recover'
+  | 'cancel';
+
+export interface SeriesEpisodeProductionPayload {
+  userId: string;
+  seriesId: string;
+  episodeId: string;
+  productionRunId?: string;
+  action: SeriesEpisodeProductionAction;
+  useMockAi?: boolean;
+  force?: boolean;
+}
+
+export interface SeriesContinuityValidationPayload {
+  userId: string;
+  seriesId: string;
+  episodeId: string;
+  stage: 'pre_script_approval' | 'pre_visual';
+  useMockAi?: boolean;
+}
+
+export interface SeriesReplacementPlanningPayload {
+  userId: string;
+  laneId: string;
+  sourceSeriesId: string;
+  replacementPlanId?: string;
+  mode: 'threshold' | 'manual' | 'recover';
+  useMockAi?: boolean;
+  force?: boolean;
+}
+
+export type SeriesPublishingMode = 'tick' | 'enqueue_one' | 'recover';
+
+export interface SeriesPublishingPayload {
+  mode: SeriesPublishingMode;
+  userId?: string;
+  seriesScheduleId?: string;
+  useMockSocial?: boolean;
+  force?: boolean;
+}
+
+export type SeriesMaintenanceMode =
+  | 'recover_stuck'
+  | 'missed_schedules'
+  | 'cleanup'
+  | 'disk_check';
+
+export interface SeriesMaintenancePayload {
+  mode: SeriesMaintenanceMode;
+  userId?: string;
+  laneId?: string;
 }

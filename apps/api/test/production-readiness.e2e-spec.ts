@@ -7,6 +7,7 @@ import request from 'supertest';
 import type { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/prisma/prisma.service';
+import { seedAndLogin } from './helpers/auth-fixtures';
 import { RolesGuard } from '../src/modules/auth/guards/roles.guard';
 
 /**
@@ -45,38 +46,20 @@ describe('Phase 12 production readiness (e2e)', () => {
     const adminEmail = `admin-p12-${Date.now()}@example.com`;
     const editorEmail = `editor-p12-${Date.now()}@example.com`;
 
-    await request(app.getHttpServer())
-      .post('/api/auth/register')
-      .send({ name: 'Admin', email: adminEmail, password })
-      .expect((res) => {
-        if (![200, 201].includes(res.status)) {
-          throw new Error(`register admin expected 200/201 got ${res.status}`);
-        }
-      });
-    await request(app.getHttpServer())
-      .post('/api/auth/register')
-      .send({ name: 'Editor', email: editorEmail, password })
-      .expect((res) => {
-        if (![200, 201].includes(res.status)) {
-          throw new Error(`register editor expected 200/201 got ${res.status}`);
-        }
-      });
-
-    await prisma.user.update({
-      where: { email: adminEmail },
-      data: { role: UserRole.ADMIN },
+    const adminLogin = await seedAndLogin(app, prisma, {
+      name: 'Admin',
+      email: adminEmail,
+      password,
+      role: UserRole.ADMIN,
     });
-
-    const adminLogin = await request(app.getHttpServer())
-      .post('/api/auth/login')
-      .send({ email: adminEmail, password })
-      .expect(200);
     adminToken = adminLogin.body.data.accessToken;
 
-    const editorLogin = await request(app.getHttpServer())
-      .post('/api/auth/login')
-      .send({ email: editorEmail, password })
-      .expect(200);
+    const editorLogin = await seedAndLogin(app, prisma, {
+      name: 'Editor',
+      email: editorEmail,
+      password,
+      role: UserRole.EDITOR,
+    });
     editorToken = editorLogin.body.data.accessToken;
   }, 120_000);
 

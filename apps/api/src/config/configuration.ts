@@ -178,7 +178,6 @@ export default () => ({
     backupStaleHours: parseInt(process.env.BACKUP_STALE_HOURS ?? '36', 10),
     maxUploadBytes: parseInt(process.env.MAX_UPLOAD_BYTES ?? String(100 * 1024 * 1024), 10),
     maxVideoDurationSeconds: parseInt(process.env.MAX_VIDEO_DURATION_SECONDS ?? '600', 10),
-    registrationEnabled: process.env.REGISTRATION_ENABLED !== 'false',
     adminBootstrapToken: process.env.ADMIN_BOOTSTRAP_TOKEN || undefined,
   },
   alerts: {

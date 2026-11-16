@@ -48,7 +48,7 @@ api.interceptors.response.use(
       return Promise.reject(error);
     }
 
-    if (original.url?.includes('/auth/login') || original.url?.includes('/auth/register')) {
+    if (original.url?.includes('/auth/login')) {
       return Promise.reject(error);
     }
 

@@ -16,6 +16,7 @@ import { AutomationOrchestratorService } from '../src/modules/automation/automat
 import { AutomationPublishSchedulerService } from '../src/modules/automation/automation-publish-scheduler.service';
 import { ContentPlannerService } from '../src/modules/automation/content-planner.service';
 import { PrismaService } from '../src/prisma/prisma.service';
+import { seedAndLogin } from './helpers/auth-fixtures';
 
 describe('Automation Phase 10 (e2e)', () => {
   let app: INestApplication<App>;
@@ -90,14 +91,16 @@ describe('Automation Phase 10 (e2e)', () => {
     await prisma.setting.deleteMany();
     await prisma.user.deleteMany();
 
-    const userA = await request(app.getHttpServer())
-      .post('/api/auth/register')
-      .send({ name: 'Auto A', email: 'auto-a@example.com', password })
-      .expect(201);
-    const userB = await request(app.getHttpServer())
-      .post('/api/auth/register')
-      .send({ name: 'Auto B', email: 'auto-b@example.com', password })
-      .expect(201);
+    const userA = await seedAndLogin(app, prisma, {
+      name: 'Auto A',
+      email: 'auto-a@example.com',
+      password: password,
+    });
+    const userB = await seedAndLogin(app, prisma, {
+      name: 'Auto B',
+      email: 'auto-b@example.com',
+      password: password,
+    });
 
     accessTokenA = userA.body.data.accessToken;
     accessTokenB = userB.body.data.accessToken;

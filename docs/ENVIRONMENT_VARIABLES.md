@@ -268,7 +268,7 @@ The SMTP client is a small built-in implementation (no nodemailer). **No test em
 | Variable | Default | Effect |
 | --- | --- | --- |
 | `PROCESS_ROLE` | `all` | `all` = HTTP + crons + automation/analytics queue hosts (dev/single-container). `api` = HTTP + producers only (safe to scale). `scheduler` = Nest crons + automation/analytics BullMQ hosts (singleton). Prod compose sets `api` / `scheduler` explicitly. |
-| `REGISTRATION_ENABLED` | `true` (unless `false`) | When `false`, `POST /api/auth/register` returns conflict. Production example sets `false`. |
+| ~~`REGISTRATION_ENABLED`~~ | removed | Public `POST /api/auth/register` was removed. Existing users login only; create accounts via DB/seed. |
 | `ADMIN_BOOTSTRAP_TOKEN` | empty | One-time bootstrap secret (≥16 chars) for `POST /api/ops/bootstrap-admin`. Unused after first successful bootstrap. |
 | `QUEUE_BACKLOG_ALERT_THRESHOLD` | `100` | Ops monitor fires when waiting jobs ≥ threshold. |
 | `PROVIDER_SPEND_ALERT_USD` | `50` | Daily `ProviderUsage` spend alert threshold. |

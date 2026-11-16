@@ -24,7 +24,6 @@ import {
 import type { AuthenticatedUser } from './auth.types';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { LoginDto } from './dto/login.dto';
-import { RegisterDto } from './dto/register.dto';
 
 @ApiTags('auth')
 @Controller('auth')
@@ -33,19 +32,6 @@ export class AuthController {
     private readonly authService: AuthService,
     private readonly config: ConfigService,
   ) {}
-
-  @Public()
-  @Post('register')
-  @Throttle({ default: { limit: 5, ttl: 60_000 } })
-  @ApiOperation({ summary: 'Register a new user' })
-  async register(
-    @Body() dto: RegisterDto,
-    @Res({ passthrough: true }) res: Response,
-  ) {
-    const { result, refreshToken } = await this.authService.register(dto);
-    setRefreshCookie(res, refreshToken, this.config);
-    return { success: true, data: result };
-  }
 
   @Public()
   @Post('login')

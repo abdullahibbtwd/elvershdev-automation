@@ -4,7 +4,7 @@ What the platform does (read from the code), what Phase 12 added, and what must 
 
 > **Honest summary of current gaps**
 > 1. Roles (`ADMIN`, `EDITOR`, `VIEWER`) are stored and put in the JWT payload, but **only `/api/ops/*` enforces one** (`@Roles(ADMIN)` via `RolesGuard`, **[PHASE 12]**). Every other route ignores the role, so `VIEWER` can do everything `EDITOR` can.
-> 2. Registration defaults to open locally; production example sets `REGISTRATION_ENABLED=false` **[PHASE 12.1]**.
+> 2. Public registration is disabled — existing users login only; create accounts via DB/seed.
 > 3. Redis has **no password** in the dev `docker-compose.yml`. `docker-compose.prod.yml` sets `--requirepass`, and `validateProductionConfig` refuses to start the API in production without `REDIS_PASSWORD`.
 > 4. The dev compose file and `.env.example` are development settings (public ports, default passwords, placeholder secrets). Use `docker-compose.prod.yml` and `.env.production.example` for a VPS.
 > 5. Swagger is mounted unless `SWAGGER_ENABLED=false` (the production example sets it; `.env.example` ships `true`). Caddy still proxies `/docs*`.
@@ -45,7 +45,7 @@ Until RBAC is enforced:
 - Do not rely on `VIEWER` as a restriction.
 - Treat every registered user as trusted with respect to **spending provider budget** and **publishing to connected channels they own**.
 - Close or gate registration before exposing the site (see section 9).
-- The Phase 12 ops endpoints do have a role check (ADMIN). Note that admins can trigger backups, cleanup, queue pause/resume, retry jobs, change `ROLLOUT_STAGE`, emergency stop, pause all automation and promote other users, so treat ADMIN accounts as highly privileged. Set `REGISTRATION_ENABLED=false` after bootstrap; every new account still starts as `EDITOR`.
+- The Phase 12 ops endpoints do have a role check (ADMIN). Note that admins can trigger backups, cleanup, queue pause/resume, retry jobs, change `ROLLOUT_STAGE`, emergency stop, pause all automation and promote other users, so treat ADMIN accounts as highly privileged. Public registration is removed; seed new users carefully (default role remains `EDITOR` unless set).
 
 ## 3. Credential encryption (social tokens)
 
@@ -120,7 +120,7 @@ Caveats:
 - [ ] No ports published except 80/443; external port scan clean
 - [ ] `TRUST_PROXY` on and per-IP limiting verified behind Caddy (implemented; not yet verified)
 - [ ] `/docs` disabled (`SWAGGER_ENABLED=false`) and confirmed 404 through Caddy
-- [ ] Registration closed (`REGISTRATION_ENABLED=false`) after bootstrap, or additionally blocked at Caddy
+- [ ] Confirm `/api/auth/register` is absent / 404 and login works for existing users
 - [ ] RBAC beyond `/api/ops/*` added, or accepted as a risk in writing
 - [ ] CSP added (Caddy has other security headers, but no CSP)
 - [ ] Provider monthly spend guards set (`KLING_MAX_MONTHLY_SPEND_USD`, `GEMINI_TTS_MAX_MONTHLY_SPEND_USD`)

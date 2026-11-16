@@ -17,7 +17,6 @@ import type {
 } from './auth.types';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { LoginDto } from './dto/login.dto';
-import { RegisterDto } from './dto/register.dto';
 
 const BCRYPT_ROUNDS = 12;
 
@@ -29,30 +28,6 @@ export class AuthService {
     private readonly jwtService: JwtService,
     private readonly config: ConfigService,
   ) {}
-
-  async register(dto: RegisterDto): Promise<{ result: AuthResult; refreshToken: string }> {
-    const registrationEnabled = this.config.get<boolean>('ops.registrationEnabled', true);
-    if (!registrationEnabled) {
-      throw new ConflictException('Registration is disabled');
-    }
-
-    const email = dto.email.toLowerCase().trim();
-    const existing = await this.prisma.user.findUnique({ where: { email } });
-    if (existing) {
-      throw new ConflictException('Email is already registered');
-    }
-
-    const passwordHash = await bcrypt.hash(dto.password, BCRYPT_ROUNDS);
-    const user = await this.prisma.user.create({
-      data: {
-        name: dto.name.trim(),
-        email,
-        passwordHash,
-      },
-    });
-
-    return this.issueAuthBundle(user);
-  }
 
   async login(dto: LoginDto): Promise<{ result: AuthResult; refreshToken: string }> {
     const email = dto.email.toLowerCase().trim();

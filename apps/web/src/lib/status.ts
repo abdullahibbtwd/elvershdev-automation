@@ -5,6 +5,9 @@ export function statusTone(status: string): 'default' | 'success' | 'warning' | 
     case 'PUBLISHED':
     case 'ENABLED':
     case 'RUNNING':
+    case 'ACTIVE':
+    case 'APPROVED':
+    case 'RENDERED':
       return 'success';
     case 'FAILED':
     case 'CANCELLED':
@@ -13,12 +16,18 @@ export function statusTone(status: string): 'default' | 'success' | 'warning' | 
     case 'BUDGET_BLOCKED':
     case 'INELIGIBLE':
     case 'STALLED':
+    case 'REJECTED':
       return 'danger';
     case 'PAUSED':
     case 'WAITING':
+    case 'IDLE':
+    case 'SCRIPT_READY':
       return 'warning';
     case 'SCHEDULED':
     case 'PLANNED':
+    case 'PRODUCING':
+    case 'SCRIPTING':
+    case 'RETRYING':
       return 'info';
     case 'DISABLED':
     case 'SKIPPED':

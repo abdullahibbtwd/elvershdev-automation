@@ -3,6 +3,7 @@ import {
   BarChart3,
   Bot,
   CalendarDays,
+  Clapperboard,
   Film,
   FolderKanban,
   History,
@@ -60,6 +61,15 @@ export const navGroups: NavGroup[] = [
     ],
   },
   {
+    id: 'series',
+    label: 'Series Studio',
+    items: [
+      { to: '/series', label: 'Overview', icon: Clapperboard, end: true },
+      { to: '/series/library', label: 'Library', icon: Library },
+      { to: '/series/settings', label: 'Settings', icon: Settings },
+    ],
+  },
+  {
     id: 'system',
     label: 'System',
     items: [
@@ -82,6 +92,9 @@ export const routeTitles: Record<string, string> = {
   '/automation/calendar': 'Automation Calendar',
   '/automation/settings': 'Automation Settings',
   '/automation/executions': 'Automation Executions',
+  '/series': 'Series Studio',
+  '/series/library': 'Series Library',
+  '/series/settings': 'Series Settings',
   '/analytics': 'Analytics',
   '/analytics/costs': 'Cost Analytics',
   '/analytics/insights': 'Insights',
@@ -93,6 +106,11 @@ export function resolvePageTitle(pathname: string): string {
   if (routeTitles[pathname]) return routeTitles[pathname];
   if (pathname.startsWith('/projects/')) return 'Project Detail';
   if (pathname.startsWith('/stories/')) return 'Story Detail';
+  if (/^\/series\/[^/]+\/episodes\//.test(pathname)) return 'Series Episode';
+  if (/^\/series\/[^/]+\/characters/.test(pathname)) return 'Character Studio';
+  if (/^\/series\/[^/]+$/.test(pathname) && pathname !== '/series/library' && pathname !== '/series/settings') {
+    return 'Series Detail';
+  }
   if (pathname.startsWith('/analytics/videos/')) return 'Video Analytics';
   const match = Object.keys(routeTitles)
     .filter((key) => key !== '/' && pathname.startsWith(key))

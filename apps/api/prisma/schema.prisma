@@ -333,6 +333,14 @@ model User {
   analyticsSyncJobs           AnalyticsSyncJob[]
   analyticsInsights           AnalyticsInsight[]
   analyticsOptimizationSettings AnalyticsOptimizationSettings?
+  seriesAutomationConfig      SeriesAutomationConfig?
+  seriesLanes                 SeriesLane[]
+  storySeries                 StorySeries[]
+  seriesSchedules             SeriesSchedule[]
+  seriesProductionRuns        SeriesProductionRun[]
+  seriesReplacementPlans      SeriesReplacementPlan[]
+  seriesAuditLogs             SeriesAuditLog[]
+  seriesExecutions            SeriesExecution[]
 
   @@index([email])
   @@map("users")
@@ -439,6 +447,7 @@ model Story {
   narrationScripts  NarrationScript[]
   audioGenerations  AudioGeneration[]
   videoRenders      VideoRender[]
+  seriesEpisodes    SeriesEpisode[]
 
   @@index([userId])
   @@index([status])
@@ -699,6 +708,7 @@ model VideoProject {
   mediaAssets    MediaAsset[]
   generationJobs GenerationJob[]
   publishRecords PublishRecord[]
+  seriesEpisodes SeriesEpisode[]
 
   @@index([userId])
   @@index([storyId])
@@ -722,12 +732,14 @@ model MediaAsset {
   videoProject              VideoProject?              @relation(fields: [videoProjectId], references: [id], onDelete: SetNull)
   sceneVisual               SceneVisual?               @relation("SceneVisualImage")
   characterVisualReferences CharacterVisualReference[]
+  characterReferenceAssets  CharacterReferenceAsset[]
   motionSourceFor           MotionGeneration[]         @relation("MotionSourceMedia")
   motionOutputFor           MotionGeneration?          @relation("MotionOutputMedia")
   audioGenerations          AudioGeneration[]          @relation("AudioMediaAsset")
   videoRenderOutputs        VideoRender[]              @relation("VideoRenderOutput")
   videoRenderSubtitles      VideoRender[]              @relation("VideoRenderSubtitle")
   videoRenderMusic          VideoRender[]              @relation("VideoRenderMusic")
+  seriesPosters             StorySeries[]              @relation("SeriesPoster")
 
   @@index([userId])
   @@index([videoProjectId])
@@ -770,6 +782,7 @@ model GenerationJob {
   audioGenerations          AudioGeneration[]
   videoRenders              VideoRender[]
   publishRecords            PublishRecord[]
+  seriesProductionRuns      SeriesProductionRun[]
 
   @@index([userId])
   @@index([videoProjectId])
@@ -1015,6 +1028,7 @@ model VideoRender {
   scenes               VideoRenderScene[]
   publishRecords       PublishRecord[]
   videoAnalytics       VideoAnalytics?
+  seriesEpisodes       SeriesEpisode[]
 
   @@index([userId])
   @@index([storyId])
@@ -1649,4 +1663,713 @@ model InterruptedTask {
   @@index([createdAt])
   @@index([republishBlocked])
   @@map("interrupted_tasks")
+}
+
+// ---------------------------------------------------------------------------
+// AI Series Studio (Phase B) — independent of standalone AutomationConfig
+// ---------------------------------------------------------------------------
+
+enum SeriesLaneType {
+  MORNING
+  EVENING
+  CUSTOM
+}
+
+enum SeriesExecutionTrigger {
+  MANUAL
+  SCHEDULED
+}
+
+enum SeriesExecutionStatus {
+  QUEUED
+  RUNNING
+  AWAITING_APPROVAL
+  COMPLETED
+  SKIPPED
+  FAILED
+  CANCELLED
+}
+
+enum SeriesExecutionAction {
+  PLAN_MOVIE
+  GENERATE_CHARACTERS
+  PLAN_EPISODE
+  PRODUCE_EPISODE
+  ENSURE_SCHEDULE
+  PUBLISH
+  REPLACE_MOVIE
+  AWAIT_SERIES_APPROVAL
+  AWAIT_EPISODE_APPROVAL
+  IDLE_REPORT
+}
+
+enum SeriesLaneStatus {
+  ACTIVE
+  PAUSED
+  DISABLED
+}
+
+enum SeriesProductionStartMode {
+  IMMEDIATE
+  NEXT_WINDOW
+  CUSTOM
+  MANUAL
+}
+
+/// Series Studio autonomy — independent of mock AI / useMockAi.
+enum SeriesAutonomyMode {
+  MANUAL
+  FULLY_AUTONOMOUS
+}
+
+enum StorySeriesStatus {
+  DRAFT
+  PLANNING
+  READY
+  ACTIVE
+  COMPLETED
+  ARCHIVED
+  FAILED
+  SUPERSEDED
+  REPLACEMENT_CANDIDATE
+}
+
+enum SeriesApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  NEEDS_REVISION
+}
+
+enum SeriesCharacterRole {
+  PROTAGONIST
+  ANTAGONIST
+  SUPPORTING
+  CAMEO
+  NARRATOR
+}
+
+enum SeriesCharacterLifecycle {
+  ACTIVE
+  INJURED
+  MISSING
+  DECEASED
+  UNKNOWN
+}
+
+enum SeriesEpisodeStatus {
+  PLANNED
+  SCRIPTING
+  SCRIPT_READY
+  APPROVED
+  PRODUCING
+  RENDERED
+  SCHEDULED
+  PUBLISHED
+  FAILED
+  SKIPPED
+}
+
+enum SeriesEpisodeApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum SeriesEpisodeProductionState {
+  IDLE
+  QUEUED
+  RUNNING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum SeriesScheduleState {
+  PENDING
+  SCHEDULED
+  QUEUED
+  PUBLISHING
+  PUBLISHED
+  FAILED
+  CANCELLED
+  SKIPPED
+  MISSED
+}
+
+enum SeriesProductionRunStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+  CANCELLED
+  RETRYING
+}
+
+enum SeriesReplacementStatus {
+  PENDING
+  PLANNING
+  EVALUATING
+  READY_FOR_REVIEW
+  APPROVED
+  REJECTED
+  FAILED
+  CANCELLED
+  ACTIVATED
+}
+
+enum SeriesMemoryVisibility {
+  PUBLIC
+  AUDIENCE_ONLY
+  CHARACTER_RESTRICTED
+  SECRET
+}
+
+enum SeriesContinuityPoint {
+  BEFORE
+  AFTER
+}
+
+/// Global per-user Series Studio switches (independent of AutomationConfig).
+model SeriesAutomationConfig {
+  id                              String            @id @default(uuid())
+  userId                          String            @unique @map("user_id")
+  seriesStudioEnabled             Boolean           @default(false) @map("series_studio_enabled")
+  runMode                         AutomationRunMode @default(PAUSED) @map("run_mode")
+  morningLaneEnabled              Boolean           @default(true) @map("morning_lane_enabled")
+  eveningLaneEnabled              Boolean           @default(true) @map("evening_lane_enabled")
+  automaticMoviePlanning          Boolean           @default(true) @map("automatic_movie_planning")
+  /// Master switch for automatic episode scripting + media stages (individual stage switches still apply).
+  automaticEpisodeProduction      Boolean           @default(true) @map("automatic_episode_production")
+  automaticCharacterGeneration    Boolean           @default(true) @map("automatic_character_generation")
+  automaticEpisodeScriptGeneration Boolean          @default(true) @map("automatic_episode_script_generation")
+  automaticVisualGeneration       Boolean           @default(true) @map("automatic_visual_generation")
+  automaticMotionGeneration       Boolean           @default(true) @map("automatic_motion_generation")
+  automaticNarration              Boolean           @default(true) @map("automatic_narration")
+  automaticRendering              Boolean           @default(true) @map("automatic_rendering")
+  automaticPublishing             Boolean           @default(false) @map("automatic_publishing")
+  automaticReplacementPlanning    Boolean           @default(true) @map("automatic_replacement_planning")
+  automaticReplacementApproval    Boolean           @default(false) @map("automatic_replacement_approval")
+  episodeApprovalRequired         Boolean           @default(true) @map("episode_approval_required")
+  movieApprovalRequired           Boolean           @default(true) @map("movie_approval_required")
+  /// MANUAL keeps legacy approval workflow; FULLY_AUTONOMOUS overrides routine approval gates.
+  /// Defaults to MANUAL so existing deployments are not silently flipped.
+  autonomyMode                    SeriesAutonomyMode @default(MANUAL) @map("autonomy_mode")
+  /// When false, planning a movie never auto-starts expensive media production.
+  startMediaAfterMoviePlanning    Boolean           @default(false) @map("start_media_after_movie_planning")
+  defaultProductionStartMode      SeriesProductionStartMode @default(NEXT_WINDOW) @map("default_production_start_mode")
+  defaultProductionLeadTimeMinutes Int              @default(240) @map("default_production_lead_time_minutes")
+  defaultPlannedEpisodeCount      Int               @default(10) @map("default_planned_episode_count")
+  defaultEpisodeDurationSeconds   Int               @default(60) @map("default_episode_duration_seconds")
+  defaultReplacementTriggerEpisode Int              @default(8) @map("default_replacement_trigger_episode")
+  maxConcurrentEpisodeProduction  Int               @default(1) @map("max_concurrent_episode_production")
+  maxRetries                      Int               @default(3) @map("max_retries")
+  qualityAcceptanceThreshold      Float             @default(0.7) @map("quality_acceptance_threshold")
+  language                        String            @default("en")
+  tone                            String?           
+  visualDirection                 String?           @map("visual_direction") @db.Text
+  visualStyleId                   String?           @map("visual_style_id")
+  narrationVoiceId                String?           @map("narration_voice_id")
+  activeChannelIds                String[]          @default([]) @map("active_channel_ids")
+  channelPublishingEnabled        Json              @default("{\"FACEBOOK\":true,\"INSTAGRAM\":true,\"TIKTOK\":true,\"YOUTUBE\":true}") @map("channel_publishing_enabled")
+  dailyBudgetUsd                  Decimal?          @map("daily_budget_usd") @db.Decimal(12, 4)
+  monthlyBudgetUsd                Decimal?          @map("monthly_budget_usd") @db.Decimal(12, 4)
+  maxCostPerEpisodeUsd            Decimal?          @map("max_cost_per_episode_usd") @db.Decimal(12, 4)
+  /// Global Series Creative Settings (separate from standalone AutomationConfig).
+  creativeSettings                Json              @default("{}") @map("creative_settings")
+  emergencyStopAt                 DateTime?         @map("emergency_stop_at")
+  pausedAt                        DateTime?         @map("paused_at")
+  createdAt                       DateTime          @default(now()) @map("created_at")
+  updatedAt                       DateTime          @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([seriesStudioEnabled, runMode])
+  @@map("series_automation_configs")
+}
+
+model SeriesLane {
+  id                         String           @id @default(uuid())
+  userId                     String           @map("user_id")
+  laneType                   SeriesLaneType   @map("lane_type")
+  name                       String           @default("Series Lane")
+  description                String?          @db.Text
+  enabled                    Boolean          @default(true)
+  status                     SeriesLaneStatus @default(PAUSED)
+  publishTime                String           @map("publish_time")
+  timezone                   String           @default("UTC")
+  /// Minutes before publishTime when auto scripting/media may begin.
+  productionLeadTimeMinutes  Int              @default(240) @map("production_lead_time_minutes")
+  /// Optional HH:MM override for production start (otherwise publishTime - lead).
+  preferredProductionTime    String?          @map("preferred_production_time")
+  productionStartMode        SeriesProductionStartMode @default(NEXT_WINDOW) @map("production_start_mode")
+  customProductionStartAt    DateTime?        @map("custom_production_start_at")
+  activeSeriesId             String?          @unique @map("active_series_id")
+  plannedEpisodeCount        Int              @default(10) @map("planned_episode_count")
+  targetEpisodeDurationSeconds Int            @default(60) @map("target_episode_duration_seconds")
+  replacementTriggerEpisode  Int              @default(8) @map("replacement_trigger_episode")
+  currentEpisodeNumber       Int              @default(0) @map("current_episode_number")
+  lastPublishedEpisodeNumber Int              @default(0) @map("last_published_episode_number")
+  lastPublishedAt            DateTime?        @map("last_published_at")
+  nextPublishAt              DateTime?        @map("next_publish_at")
+  nextProductionAt           DateTime?        @map("next_production_at")
+  pausedAt                   DateTime?        @map("paused_at")
+  deletedAt                  DateTime?        @map("deleted_at")
+  sortOrder                  Int              @default(0) @map("sort_order")
+  /// Lane-specific creative direction (overrides global creativeSettings).
+  creativeSettings           Json             @default("{}") @map("creative_settings")
+  publishingConfig           Json             @default("{}") @map("publishing_config")
+  metadata                   Json             @default("{}")
+  createdAt                  DateTime         @default(now()) @map("created_at")
+  updatedAt                  DateTime         @updatedAt @map("updated_at")
+
+  user              User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  activeSeries      StorySeries?           @relation("LaneActiveSeries", fields: [activeSeriesId], references: [id], onDelete: SetNull)
+  series            StorySeries[]          @relation("LaneSeries")
+  schedules         SeriesSchedule[]
+  replacementPlans  SeriesReplacementPlan[]
+  executions        SeriesExecution[]
+
+  @@index([userId])
+  @@index([userId, deletedAt])
+  @@index([status])
+  @@index([enabled, status])
+  @@index([nextPublishAt])
+  @@index([nextProductionAt])
+  @@index([userId, sortOrder])
+  @@map("series_lanes")
+}
+
+/// Manual or scheduled Series Studio execution records (Run Now / cron handoff).
+model SeriesExecution {
+  id                String                  @id @default(uuid())
+  userId            String                  @map("user_id")
+  laneId            String                  @map("lane_id")
+  triggerSource     SeriesExecutionTrigger  @map("trigger_source")
+  requestedAction   SeriesExecutionAction   @map("requested_action")
+  resolvedAction    SeriesExecutionAction?  @map("resolved_action")
+  status            SeriesExecutionStatus   @default(QUEUED)
+  seriesId          String?                 @map("series_id")
+  episodeId         String?                 @map("episode_id")
+  queueJobIds       Json                    @default("[]") @map("queue_job_ids")
+  idempotencyKey    String                  @unique @map("idempotency_key")
+  errorMessage      String?                 @map("error_message") @db.Text
+  resultSummary     Json                    @default("{}") @map("result_summary")
+  startedAt         DateTime?               @map("started_at")
+  completedAt       DateTime?               @map("completed_at")
+  metadata          Json                    @default("{}")
+  createdAt         DateTime                @default(now()) @map("created_at")
+  updatedAt         DateTime                @updatedAt @map("updated_at")
+
+  user User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lane SeriesLane @relation(fields: [laneId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([laneId])
+  @@index([status])
+  @@index([userId, status])
+  @@index([laneId, status])
+  @@index([createdAt])
+  @@map("series_executions")
+}
+
+model StorySeries {
+  id                         String               @id @default(uuid())
+  userId                     String               @map("user_id")
+  laneId                     String               @map("lane_id")
+  title                      String
+  slug                       String
+  logline                    String?              @db.Text
+  synopsis                   String?              @db.Text
+  genre                      String?
+  subgenres                  String[]             @default([])
+  targetAudience             String?              @map("target_audience")
+  visualStyle                String?              @map("visual_style") @db.Text
+  language                   String               @default("en")
+  tone                       String?
+  targetEpisodeDurationSeconds Int                @default(60) @map("target_episode_duration_seconds")
+  plannedEpisodeCount        Int                  @default(10) @map("planned_episode_count")
+  currentEpisodeNumber       Int                  @default(0) @map("current_episode_number")
+  status                     StorySeriesStatus    @default(DRAFT)
+  approvalStatus             SeriesApprovalStatus @default(PENDING) @map("approval_status")
+  approvedAt                 DateTime?            @map("approved_at")
+  qualityScores              Json?                @map("quality_scores")
+  posterMediaAssetId         String?              @map("poster_media_asset_id")
+  isReplacementCandidate     Boolean              @default(false) @map("is_replacement_candidate")
+  activatedAt                DateTime?            @map("activated_at")
+  completedAt                DateTime?            @map("completed_at")
+  metadata                   Json                 @default("{}")
+  createdAt                  DateTime             @default(now()) @map("created_at")
+  updatedAt                  DateTime             @updatedAt @map("updated_at")
+
+  user               User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lane               SeriesLane              @relation("LaneSeries", fields: [laneId], references: [id], onDelete: Cascade)
+  activeForLane      SeriesLane?             @relation("LaneActiveSeries")
+  posterMediaAsset   MediaAsset?             @relation("SeriesPoster", fields: [posterMediaAssetId], references: [id], onDelete: SetNull)
+  bible              SeriesBible?
+  characters         SeriesCharacter[]
+  episodes           SeriesEpisode[]
+  continuitySnapshots SeriesContinuitySnapshot[]
+  memoryEvents       SeriesMemoryEvent[]
+  productionRuns     SeriesProductionRun[]
+  sourceReplacementPlans   SeriesReplacementPlan[] @relation("ReplacementSourceSeries")
+  proposedReplacementPlans SeriesReplacementPlan[] @relation("ReplacementProposedSeries")
+
+  @@unique([userId, slug])
+  @@index([userId])
+  @@index([laneId])
+  @@index([status])
+  @@index([approvalStatus])
+  @@index([laneId, status])
+  @@map("story_series")
+}
+
+model SeriesBible {
+  id                String   @id @default(uuid())
+  seriesId          String   @unique @map("series_id")
+  version           Int      @default(1)
+  premise           String   @db.Text
+  worldRules        String   @db.Text @map("world_rules")
+  setting           String   @db.Text
+  masterPlot        String   @db.Text @map("master_plot")
+  beginning         String   @db.Text
+  middle            String   @db.Text
+  climax            String   @db.Text
+  resolution        String   @db.Text
+  majorConflicts    String   @db.Text @map("major_conflicts")
+  secrets           Json     @default("[]")
+  reveals           Json     @default("[]")
+  ending            String   @db.Text
+  canonicalOutline  Json     @default("{}") @map("canonical_outline")
+  episodeOutlines   Json     @default("[]") @map("episode_outlines")
+  foreshadowingMap  Json     @default("[]") @map("foreshadowing_map")
+  cliffhangerPayoffMap Json  @default("[]") @map("cliffhanger_payoff_map")
+  characterArcs     Json     @default("[]") @map("character_arcs")
+  knowledgeMap      Json     @default("{}") @map("knowledge_map")
+  approvedAt        DateTime? @map("approved_at")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  series StorySeries @relation(fields: [seriesId], references: [id], onDelete: Cascade)
+
+  @@map("series_bibles")
+}
+
+model SeriesCharacter {
+  id                         String                  @id @default(uuid())
+  seriesId                   String                  @map("series_id")
+  name                       String
+  role                       SeriesCharacterRole     @default(SUPPORTING)
+  species                    String                  @default("human")
+  ageRange                   String?                 @map("age_range")
+  personality                String                  @db.Text
+  motivation                 String                  @db.Text
+  backstory                  String                  @db.Text
+  physicalDescription        String                  @map("physical_description") @db.Text
+  facialStructure            String?                 @map("facial_structure") @db.Text
+  eyeColor                   String?                 @map("eye_color")
+  eyeShape                   String?                 @map("eye_shape")
+  hairFurColor               String?                 @map("hair_fur_color")
+  markings                   String?                 @db.Text
+  bodyProportions            String?                 @map("body_proportions") @db.Text
+  clothing                   String?                 @db.Text
+  accessories                String?                 @db.Text
+  heightRelative             String?                 @map("height_relative")
+  voiceProfile               String?                 @map("voice_profile") @db.Text
+  emotionalCharacteristics   String?                 @map("emotional_characteristics") @db.Text
+  relationships              Json                    @default("[]")
+  secrets                    Json                    @default("[]")
+  flaws                      Json                    @default("[]")
+  lifecycleStatus            SeriesCharacterLifecycle @default(ACTIVE) @map("lifecycle_status")
+  canonicalVisualDescription String?                 @map("canonical_visual_description") @db.Text
+  visualConsistencyNotes     String?                 @map("visual_consistency_notes") @db.Text
+  identityVersion            Int                     @default(1) @map("identity_version")
+  approvedAt                 DateTime?               @map("approved_at")
+  sortOrder                  Int                     @default(0) @map("sort_order")
+  metadata                   Json                    @default("{}")
+  createdAt                  DateTime                @default(now()) @map("created_at")
+  updatedAt                  DateTime                @updatedAt @map("updated_at")
+
+  series           StorySeries               @relation(fields: [seriesId], references: [id], onDelete: Cascade)
+  referenceAssets  CharacterReferenceAsset[]
+
+  @@unique([seriesId, name])
+  @@index([seriesId])
+  @@index([role])
+  @@map("series_characters")
+}
+
+/// Series-level reference portraits. Reuses MediaAsset storage; does not replace CharacterVisualReference.
+model CharacterReferenceAsset {
+  id                 String   @id @default(uuid())
+  seriesCharacterId  String   @map("series_character_id")
+  mediaAssetId       String   @map("media_asset_id")
+  version            Int      @default(1)
+  isApproved         Boolean  @default(false) @map("is_approved")
+  isPrimary          Boolean  @default(false) @map("is_primary")
+  prompt             String   @db.Text
+  provider           String?
+  providerModel      String?  @map("provider_model")
+  generationMetadata Json     @default("{}") @map("generation_metadata")
+  approvedAt         DateTime? @map("approved_at")
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  seriesCharacter SeriesCharacter @relation(fields: [seriesCharacterId], references: [id], onDelete: Cascade)
+  mediaAsset      MediaAsset      @relation(fields: [mediaAssetId], references: [id], onDelete: Cascade)
+
+  @@index([seriesCharacterId])
+  @@index([mediaAssetId])
+  @@index([seriesCharacterId, isPrimary])
+  @@index([seriesCharacterId, isApproved])
+  @@map("character_reference_assets")
+}
+
+model SeriesEpisode {
+  id                   String                       @id @default(uuid())
+  seriesId             String                       @map("series_id")
+  episodeNumber        Int                          @map("episode_number")
+  title                String
+  synopsis             String?                      @db.Text
+  script               String?                      @db.Text
+  hook                 String?                      @db.Text
+  ending               String?                      @db.Text
+  cliffhanger          String?                      @db.Text
+  narrationText        String?                      @map("narration_text") @db.Text
+  nextEpisodeSetup     String?                      @map("next_episode_setup") @db.Text
+  targetDurationSeconds Int                         @default(60) @map("target_duration_seconds")
+  actualDurationSeconds Float?                      @map("actual_duration_seconds")
+  spokenWordCount      Int?                         @map("spoken_word_count")
+  status               SeriesEpisodeStatus          @default(PLANNED)
+  approvalStatus       SeriesEpisodeApprovalStatus  @default(PENDING) @map("approval_status")
+  productionState      SeriesEpisodeProductionState @default(IDLE) @map("production_state")
+  approvedAt           DateTime?                    @map("approved_at")
+  scheduledAt          DateTime?                    @map("scheduled_at")
+  publishedAt          DateTime?                    @map("published_at")
+  storyId              String?                      @map("story_id")
+  videoProjectId       String?                      @map("video_project_id")
+  videoRenderId        String?                      @map("video_render_id")
+  continuityChanges    Json                         @default("{}") @map("continuity_changes")
+  metadata             Json                         @default("{}")
+  /// Earliest time auto media production may start for this episode.
+  productionEligibleAt DateTime?                    @map("production_eligible_at")
+  /// Human-readable blocker (approval, disabled stage, budget, schedule).
+  blockedReason        String?                      @map("blocked_reason") @db.Text
+  lastError            String?                      @map("last_error") @db.Text
+  createdAt            DateTime                     @default(now()) @map("created_at")
+  updatedAt            DateTime                     @updatedAt @map("updated_at")
+
+  series              StorySeries                @relation(fields: [seriesId], references: [id], onDelete: Cascade)
+  story               Story?                     @relation(fields: [storyId], references: [id], onDelete: SetNull)
+  videoProject        VideoProject?              @relation(fields: [videoProjectId], references: [id], onDelete: SetNull)
+  videoRender         VideoRender?               @relation(fields: [videoRenderId], references: [id], onDelete: SetNull)
+  scenes              EpisodeScene[]
+  continuitySnapshots SeriesContinuitySnapshot[]
+  memoryEvents        SeriesMemoryEvent[]
+  schedules           SeriesSchedule[]
+  productionRuns      SeriesProductionRun[]
+
+  @@unique([seriesId, episodeNumber])
+  @@index([seriesId])
+  @@index([status])
+  @@index([productionState])
+  @@index([storyId])
+  @@index([videoRenderId])
+  @@index([scheduledAt])
+  @@index([productionEligibleAt])
+  @@map("series_episodes")
+}
+
+model EpisodeScene {
+  id                  String   @id @default(uuid())
+  episodeId           String   @map("episode_id")
+  sceneOrder          Int      @map("scene_order")
+  location            String   @db.Text
+  characters          Json     @default("[]")
+  action              String   @db.Text
+  visualDescription   String   @map("visual_description") @db.Text
+  dialogue            String?  @db.Text
+  narration           String?  @db.Text
+  emotionalDirection  String?  @map("emotional_direction") @db.Text
+  shotDirection       String?  @map("shot_direction") @db.Text
+  assetReferences     Json     @default("{}") @map("asset_references")
+  metadata            Json     @default("{}")
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  episode SeriesEpisode @relation(fields: [episodeId], references: [id], onDelete: Cascade)
+
+  @@unique([episodeId, sceneOrder])
+  @@index([episodeId])
+  @@map("episode_scenes")
+}
+
+model SeriesContinuitySnapshot {
+  id              String                @id @default(uuid())
+  seriesId        String                @map("series_id")
+  episodeId       String                @map("episode_id")
+  point           SeriesContinuityPoint
+  characterStates Json                  @default("{}") @map("character_states")
+  relationships   Json                  @default("{}")
+  locations       Json                  @default("{}")
+  objectOwnership Json                  @default("{}") @map("object_ownership")
+  openMysteries   Json                  @default("[]") @map("open_mysteries")
+  knowledgeState  Json                  @default("{}") @map("knowledge_state")
+  timelineNotes   String?               @map("timeline_notes") @db.Text
+  summary         String?               @db.Text
+  metadata        Json                  @default("{}")
+  createdAt       DateTime              @default(now()) @map("created_at")
+
+  series  StorySeries   @relation(fields: [seriesId], references: [id], onDelete: Cascade)
+  episode SeriesEpisode @relation(fields: [episodeId], references: [id], onDelete: Cascade)
+
+  @@unique([episodeId, point])
+  @@index([seriesId])
+  @@index([episodeId])
+  @@map("series_continuity_snapshots")
+}
+
+model SeriesMemoryEvent {
+  id                 String                 @id @default(uuid())
+  seriesId           String                 @map("series_id")
+  episodeId          String?                @map("episode_id")
+  episodeNumber      Int?                   @map("episode_number")
+  eventType          String                 @map("event_type")
+  title              String
+  description        String                 @db.Text
+  affectedCharacterIds String[]             @default([]) @map("affected_character_ids")
+  importance         Int                    @default(5)
+  visibility         SeriesMemoryVisibility @default(PUBLIC)
+  knownByCharacterIds String[]              @default([]) @map("known_by_character_ids")
+  audienceKnows      Boolean                @default(true) @map("audience_knows")
+  occurredAt         DateTime?              @map("occurred_at")
+  metadata           Json                   @default("{}")
+  createdAt          DateTime               @default(now()) @map("created_at")
+
+  series  StorySeries    @relation(fields: [seriesId], references: [id], onDelete: Cascade)
+  episode SeriesEpisode? @relation(fields: [episodeId], references: [id], onDelete: SetNull)
+
+  @@index([seriesId])
+  @@index([episodeId])
+  @@index([seriesId, episodeNumber])
+  @@index([seriesId, createdAt])
+  @@index([eventType])
+  @@map("series_memory_events")
+}
+
+model SeriesSchedule {
+  id                    String             @id @default(uuid())
+  userId                String             @map("user_id")
+  laneId                String             @map("lane_id")
+  episodeId             String             @map("episode_id")
+  scheduledAt           DateTime           @map("scheduled_at")
+  publicationDestination Json              @default("{}") @map("publication_destination")
+  state                 SeriesScheduleState @default(PENDING)
+  publishRecordIds      String[]           @default([]) @map("publish_record_ids")
+  publishedAt           DateTime?          @map("published_at")
+  retryCount            Int                @default(0) @map("retry_count")
+  lastError             String?            @map("last_error")
+  idempotencyKey        String             @unique @map("idempotency_key")
+  metadata              Json               @default("{}")
+  createdAt             DateTime           @default(now()) @map("created_at")
+  updatedAt             DateTime           @updatedAt @map("updated_at")
+
+  user    User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lane    SeriesLane    @relation(fields: [laneId], references: [id], onDelete: Cascade)
+  episode SeriesEpisode @relation(fields: [episodeId], references: [id], onDelete: Cascade)
+
+  @@unique([episodeId, laneId])
+  @@index([userId])
+  @@index([laneId])
+  @@index([state])
+  @@index([scheduledAt])
+  @@index([state, scheduledAt])
+  @@index([userId, state, scheduledAt])
+  @@map("series_schedules")
+}
+
+model SeriesProductionRun {
+  id                 String                    @id @default(uuid())
+  userId             String                    @map("user_id")
+  seriesId           String                    @map("series_id")
+  episodeId          String                    @map("episode_id")
+  attemptNumber      Int                       @default(1) @map("attempt_number")
+  status             SeriesProductionRunStatus @default(PENDING)
+  stage              String?
+  providerUsageSummary Json                    @default("{}") @map("provider_usage_summary")
+  estimatedCostUsd   Decimal?                  @map("estimated_cost_usd") @db.Decimal(12, 6)
+  actualCostUsd      Decimal?                  @map("actual_cost_usd") @db.Decimal(12, 6)
+  bullJobIds         Json                      @default("[]") @map("bull_job_ids")
+  generationJobId    String?                   @map("generation_job_id")
+  errorMessage       String?                   @map("error_message") @db.Text
+  startedAt          DateTime?                 @map("started_at")
+  completedAt        DateTime?                 @map("completed_at")
+  metadata           Json                      @default("{}")
+  createdAt          DateTime                  @default(now()) @map("created_at")
+  updatedAt          DateTime                  @updatedAt @map("updated_at")
+
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  series        StorySeries    @relation(fields: [seriesId], references: [id], onDelete: Cascade)
+  episode       SeriesEpisode  @relation(fields: [episodeId], references: [id], onDelete: Cascade)
+  generationJob GenerationJob? @relation(fields: [generationJobId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([seriesId])
+  @@index([episodeId])
+  @@index([status])
+  @@index([episodeId, attemptNumber])
+  @@map("series_production_runs")
+}
+
+model SeriesReplacementPlan {
+  id                String                  @id @default(uuid())
+  userId            String                  @map("user_id")
+  laneId            String                  @map("lane_id")
+  sourceSeriesId    String                  @map("source_series_id")
+  proposedSeriesId  String?                 @map("proposed_series_id")
+  triggerEpisode    Int                     @map("trigger_episode")
+  status            SeriesReplacementStatus @default(PENDING)
+  qualityScores     Json?                   @map("quality_scores")
+  reviewNotes       String?                 @map("review_notes") @db.Text
+  approvalStatus    SeriesApprovalStatus    @default(PENDING) @map("approval_status")
+  approvedAt        DateTime?               @map("approved_at")
+  rejectedAt        DateTime?               @map("rejected_at")
+  activatedAt       DateTime?               @map("activated_at")
+  readiness         Json                    @default("{}")
+  lastError         String?                 @map("last_error") @db.Text
+  idempotencyKey    String                  @unique @map("idempotency_key")
+  metadata          Json                    @default("{}")
+  createdAt         DateTime                @default(now()) @map("created_at")
+  updatedAt         DateTime                @updatedAt @map("updated_at")
+
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lane           SeriesLane   @relation(fields: [laneId], references: [id], onDelete: Cascade)
+  sourceSeries   StorySeries  @relation("ReplacementSourceSeries", fields: [sourceSeriesId], references: [id], onDelete: Cascade)
+  proposedSeries StorySeries? @relation("ReplacementProposedSeries", fields: [proposedSeriesId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([laneId])
+  @@index([sourceSeriesId])
+  @@index([status])
+  @@index([laneId, sourceSeriesId, status])
+  @@map("series_replacement_plans")
+}
+
+model SeriesAuditLog {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  action    String
+  entityType String? @map("entity_type")
+  entityId  String?  @map("entity_id")
+  before    Json?
+  after     Json?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([createdAt])
+  @@index([userId, createdAt])
+  @@index([entityType, entityId])
+  @@map("series_audit_logs")
 }

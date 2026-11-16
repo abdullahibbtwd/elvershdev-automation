@@ -395,7 +395,7 @@ export class OpsService {
     const existing = await this.prisma.user.findUnique({ where: { email: normalized } });
     if (!existing) {
       throw new BadRequestException(
-        'User must register first, then call bootstrap-admin with that email.',
+        'User must already exist (create via seed/DB). Public registration is disabled.',
       );
     }
 

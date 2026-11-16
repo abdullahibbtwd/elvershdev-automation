@@ -1,0 +1,150 @@
+import { z } from 'zod';
+
+/** Supported Series Studio genres (multi-select). */
+export const SERIES_GENRE_OPTIONS = [
+  'Family drama',
+  'Mystery thriller',
+  'Romantic drama',
+  'Crime drama',
+  'Social drama',
+  'Revenge',
+  'Suspense',
+  'Betrayal',
+  'Supernatural',
+  'Cinematic drama',
+] as const;
+
+export const SERIES_THEME_OPTIONS = [
+  'Jealousy',
+  'Greed',
+  'Family conflict',
+  'Favouritism',
+  'Inheritance disputes',
+  'Manipulation',
+  'Hidden secrets',
+  'Deception',
+  'Power struggles',
+  'Sibling rivalry',
+] as const;
+
+export const SERIES_CLIFFHANGER_INTENSITY = ['low', 'medium', 'high'] as const;
+
+export const seriesCreativeSettingsSchema = z.object({
+  genres: z.array(z.string().min(1).max(80)).max(12).default([]),
+  themes: z.array(z.string().min(1).max(120)).max(20).default([]),
+  excludedThemes: z.array(z.string().min(1).max(120)).max(20).default([]),
+  targetAudience: z.string().max(200).optional(),
+  language: z.string().min(2).max(10).optional(),
+  tone: z.string().max(100).optional(),
+  dialogueStyle: z.string().max(300).optional(),
+  narrativeTone: z.string().max(300).optional(),
+  storytellingRules: z.array(z.string().min(1).max(400)).max(20).default([]),
+  contentExclusions: z.array(z.string().min(1).max(400)).max(20).default([]),
+  characterPreferences: z.string().max(2000).optional(),
+  endingPreferences: z.string().max(2000).optional(),
+  cliffhangerIntensity: z.enum(SERIES_CLIFFHANGER_INTENSITY).optional(),
+  visualStyle: z.string().max(2000).optional(),
+  characterConsistencyRequired: z.boolean().optional(),
+  narrationPreferences: z.string().max(2000).optional(),
+  episodeDurationSeconds: z.number().int().min(15).max(600).optional(),
+  episodesPerMovie: z.number().int().min(2).max(120).optional(),
+  aspectRatio: z.string().max(20).optional(),
+  storyConcept: z.string().max(8000).optional(),
+  customCreativeInstructions: z.string().max(8000).optional(),
+});
+
+export type SeriesCreativeSettings = z.infer<typeof seriesCreativeSettingsSchema>;
+
+export const EMPTY_SERIES_CREATIVE_SETTINGS: SeriesCreativeSettings =
+  seriesCreativeSettingsSchema.parse({});
+
+/**
+ * Merge creative settings with precedence:
+ * global < lane < movie override (partial objects).
+ * System safety rules stay outside this merge (prompt builders).
+ */
+export function mergeSeriesCreativeSettings(
+  ...layers: Array<Partial<SeriesCreativeSettings> | null | undefined>
+): SeriesCreativeSettings {
+  const merged: Record<string, unknown> = { ...EMPTY_SERIES_CREATIVE_SETTINGS };
+  for (const layer of layers) {
+    if (!layer || typeof layer !== 'object') continue;
+    for (const [key, value] of Object.entries(layer)) {
+      if (value === undefined || value === null) continue;
+      if (Array.isArray(value) && value.length === 0) continue;
+      if (typeof value === 'string' && value.trim() === '') continue;
+      merged[key] = value;
+    }
+  }
+  return seriesCreativeSettingsSchema.parse(merged);
+}
+
+export function parseSeriesCreativeSettings(raw: unknown): SeriesCreativeSettings {
+  if (!raw || typeof raw !== 'object') return { ...EMPTY_SERIES_CREATIVE_SETTINGS };
+  const parsed = seriesCreativeSettingsSchema.safeParse(raw);
+  return parsed.success ? parsed.data : { ...EMPTY_SERIES_CREATIVE_SETTINGS };
+}
+
+/** Build Movie Architect brief fields from merged creative settings. */
+export function creativeSettingsToBriefFields(settings: SeriesCreativeSettings): {
+  genre: string;
+  subgenres: string[];
+  theme?: string;
+  targetAudience?: string;
+  language?: string;
+  tone?: string;
+  visualDirection?: string;
+  plannedEpisodeCount?: number;
+  targetEpisodeDurationSeconds?: number;
+  additionalInstructions?: string;
+} {
+  const genres = settings.genres.length ? settings.genres : ['Cinematic drama'];
+  const themeParts = [
+    ...settings.themes,
+    settings.storyConcept ? `Concept: ${settings.storyConcept}` : null,
+  ].filter(Boolean) as string[];
+
+  const instructionParts = [
+    settings.dialogueStyle ? `Dialogue style: ${settings.dialogueStyle}` : null,
+    settings.narrativeTone ? `Narrative tone: ${settings.narrativeTone}` : null,
+    settings.storytellingRules.length
+      ? `Storytelling rules: ${settings.storytellingRules.join('; ')}`
+      : null,
+    settings.contentExclusions.length
+      ? `Content exclusions (must respect): ${settings.contentExclusions.join('; ')}`
+      : null,
+    settings.excludedThemes.length
+      ? `Excluded themes: ${settings.excludedThemes.join('; ')}`
+      : null,
+    settings.characterPreferences
+      ? `Character preferences: ${settings.characterPreferences}`
+      : null,
+    settings.endingPreferences ? `Ending preferences: ${settings.endingPreferences}` : null,
+    settings.cliffhangerIntensity
+      ? `Cliffhanger intensity: ${settings.cliffhangerIntensity}`
+      : null,
+    settings.characterConsistencyRequired
+      ? 'Character visual consistency is mandatory across all episodes.'
+      : null,
+    settings.narrationPreferences
+      ? `Narration preferences: ${settings.narrationPreferences}`
+      : null,
+    settings.aspectRatio ? `Aspect ratio: ${settings.aspectRatio}` : null,
+    settings.customCreativeInstructions || null,
+  ].filter(Boolean) as string[];
+
+  return {
+    genre: genres[0]!,
+    subgenres: genres.slice(1),
+    theme: themeParts.length ? themeParts.join('; ') : undefined,
+    targetAudience: settings.targetAudience,
+    language: settings.language,
+    tone: settings.tone ?? settings.narrativeTone,
+    visualDirection: settings.visualStyle,
+    plannedEpisodeCount: settings.episodesPerMovie,
+    targetEpisodeDurationSeconds: settings.episodeDurationSeconds,
+    additionalInstructions: instructionParts.length
+      ? instructionParts.join('\n')
+      : undefined,
+  };
+}

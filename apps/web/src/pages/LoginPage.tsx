@@ -2,7 +2,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { loginSchema, type LoginInput } from '@ai-video/shared';
 import { Clapperboard } from 'lucide-react';
-import { Link, Navigate, useNavigate } from 'react-router-dom';
+import { Navigate, useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -76,12 +76,6 @@ export function LoginPage() {
             <Button type="submit" className="w-full" disabled={isSubmitting}>
               {isSubmitting ? 'Signing in…' : 'Continue'}
             </Button>
-            <p className="text-center text-sm text-muted-foreground">
-              No account?{' '}
-              <Link to="/register" className="text-primary hover:underline">
-                Create one
-              </Link>
-            </p>
           </form>
         </CardContent>
       </Card>

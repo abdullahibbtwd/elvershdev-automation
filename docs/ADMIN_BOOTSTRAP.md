@@ -8,22 +8,17 @@ Do **not** use `ADMIN_EMAIL` — that variable is only the alert recipient.
 
 ## Procedure
 
+Public registration is **disabled**. Create the first operator in the database (or an internal seed script), then promote them.
+
 1. Set a strong one-time secret in `.env.production`:
 
 ```bash
 ADMIN_BOOTSTRAP_TOKEN="$(openssl rand -base64 48)"
-REGISTRATION_ENABLED=true   # temporarily, only for the first account
 ```
 
 2. Recreate the API (and scheduler) so the env is loaded.
 
-3. Register the first operator account (normal register endpoint):
-
-```bash
-curl -sS -X POST "https://$DOMAIN/api/auth/register" \
-  -H 'Content-Type: application/json' \
-  -d '{"name":"Ops","email":"ops@example.com","password":"REPLACE_STRONG_PASSWORD"}'
-```
+3. Create the first operator account in Postgres (example via `psql` / Prisma Studio / a one-off seed). The account must already exist before bootstrap.
 
 4. Promote that account via bootstrap (unauthenticated; token-gated):
 
@@ -33,10 +28,9 @@ curl -sS -X POST "https://$DOMAIN/api/ops/bootstrap-admin" \
   -d '{"email":"ops@example.com","token":"'"$ADMIN_BOOTSTRAP_TOKEN"'"}'
 ```
 
-5. Immediately disable registration and clear/rotate the bootstrap token:
+5. Clear or rotate the bootstrap token:
 
 ```bash
-REGISTRATION_ENABLED=false
 # Remove or rotate ADMIN_BOOTSTRAP_TOKEN — endpoint stays closed via setting system:adminBootstrap:completed
 ```
 

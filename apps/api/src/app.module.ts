@@ -27,6 +27,7 @@ import { PublishingModule } from './modules/publishing/publishing.module';
 import { RealtimeModule } from './modules/realtime/realtime.module';
 import { RenderingModule } from './modules/rendering/rendering.module';
 import { SchedulingModule } from './modules/scheduling/scheduling.module';
+import { SeriesModule } from './modules/series/series.module';
 import { SettingsModule } from './modules/settings/settings.module';
 import { StoriesModule } from './modules/stories/stories.module';
 import { UsersModule } from './modules/users/users.module';
@@ -103,6 +104,7 @@ import { StorageModule } from './storage/storage.module';
     ChannelsModule,
     SchedulingModule,
     AutomationModule,
+    SeriesModule,
     AnalyticsModule,
     NotificationsModule,
     RealtimeModule,

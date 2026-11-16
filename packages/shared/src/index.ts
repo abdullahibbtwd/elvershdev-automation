@@ -10,3 +10,5 @@ export * from './render-ai';
 export * from './social';
 export * from './automation';
 export * from './analytics';
+export * from './series';
+export * from './series-ai';

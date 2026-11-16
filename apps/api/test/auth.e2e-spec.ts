@@ -6,6 +6,7 @@ import request from 'supertest';
 import type { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/prisma/prisma.service';
+import { seedAndLogin, seedUser } from './helpers/auth-fixtures';
 
 describe('Auth (e2e)', () => {
   let app: INestApplication<App>;
@@ -70,38 +71,15 @@ describe('Auth (e2e)', () => {
     return match.split(';')[0]?.split('=').slice(1).join('=');
   }
 
-  it('registers a new user', async () => {
-    const res = await request(app.getHttpServer())
-      .post('/api/auth/register')
-      .send({ name: 'Ada Lovelace', email: 'ada@example.com', password })
-      .expect(201);
-
-    expect(res.body.success).toBe(true);
-    expect(res.body.data.user.email).toBe('ada@example.com');
-    expect(res.body.data.accessToken).toBeDefined();
-    expect(res.body.data.user.passwordHash).toBeUndefined();
-    expect(extractCookie(res, 'refresh_token')).toBeDefined();
-  });
-
-  it('rejects duplicate email registration', async () => {
+  it('rejects public registration (endpoint removed)', async () => {
     await request(app.getHttpServer())
       .post('/api/auth/register')
-      .send({ name: 'Ada', email: 'ada@example.com', password })
-      .expect(201);
-
-    const res = await request(app.getHttpServer())
-      .post('/api/auth/register')
-      .send({ name: 'Ada 2', email: 'ada@example.com', password })
-      .expect(409);
-
-    expect(res.body.success).toBe(false);
+      .send({ name: 'Ada Lovelace', email: 'ada@example.com', password })
+      .expect(404);
   });
 
   it('logs in with valid credentials and rejects invalid ones', async () => {
-    await request(app.getHttpServer())
-      .post('/api/auth/register')
-      .send({ name: 'Ada', email: 'ada@example.com', password })
-      .expect(201);
+    await seedUser(prisma, { name: 'Ada', email: 'ada@example.com', password });
 
     const ok = await request(app.getHttpServer())
       .post('/api/auth/login')
@@ -109,6 +87,9 @@ describe('Auth (e2e)', () => {
       .expect(200);
 
     expect(ok.body.data.accessToken).toBeDefined();
+    expect(ok.body.data.user.email).toBe('ada@example.com');
+    expect(ok.body.data.user.passwordHash).toBeUndefined();
+    expect(extractCookie(ok, 'refresh_token')).toBeDefined();
 
     await request(app.getHttpServer())
       .post('/api/auth/login')
@@ -117,16 +98,17 @@ describe('Auth (e2e)', () => {
   });
 
   it('validates access tokens on protected routes', async () => {
-    const registered = await request(app.getHttpServer())
-      .post('/api/auth/register')
-      .send({ name: 'Ada', email: 'ada@example.com', password })
-      .expect(201);
+    const loggedIn = await seedAndLogin(app, prisma, {
+      name: 'Ada',
+      email: 'ada@example.com',
+      password,
+    });
 
     await request(app.getHttpServer()).get('/api/auth/me').expect(401);
 
     const me = await request(app.getHttpServer())
       .get('/api/auth/me')
-      .set('Authorization', `Bearer ${registered.body.data.accessToken}`)
+      .set('Authorization', `Bearer ${loggedIn.body.data.accessToken}`)
       .expect(200);
 
     expect(me.body.data.email).toBe('ada@example.com');
@@ -134,12 +116,13 @@ describe('Auth (e2e)', () => {
   });
 
   it('rotates refresh tokens and rejects revoked ones', async () => {
-    const registered = await request(app.getHttpServer())
-      .post('/api/auth/register')
-      .send({ name: 'Ada', email: 'ada@example.com', password })
-      .expect(201);
+    const loggedIn = await seedAndLogin(app, prisma, {
+      name: 'Ada',
+      email: 'ada@example.com',
+      password,
+    });
 
-    const oldRefresh = extractCookie(registered, 'refresh_token');
+    const oldRefresh = extractCookie(loggedIn, 'refresh_token');
     expect(oldRefresh).toBeDefined();
 
     const refreshed = await request(app.getHttpServer())
@@ -159,12 +142,13 @@ describe('Auth (e2e)', () => {
   });
 
   it('logs out and rejects the previous refresh token', async () => {
-    const registered = await request(app.getHttpServer())
-      .post('/api/auth/register')
-      .send({ name: 'Ada', email: 'ada@example.com', password })
-      .expect(201);
+    const loggedIn = await seedAndLogin(app, prisma, {
+      name: 'Ada',
+      email: 'ada@example.com',
+      password,
+    });
 
-    const refresh = extractCookie(registered, 'refresh_token');
+    const refresh = extractCookie(loggedIn, 'refresh_token');
 
     await request(app.getHttpServer())
       .post('/api/auth/logout')
@@ -178,15 +162,16 @@ describe('Auth (e2e)', () => {
   });
 
   it('isolates user data between accounts', async () => {
-    const userA = await request(app.getHttpServer())
-      .post('/api/auth/register')
-      .send({ name: 'User A', email: 'a@example.com', password })
-      .expect(201);
-
-    const userB = await request(app.getHttpServer())
-      .post('/api/auth/register')
-      .send({ name: 'User B', email: 'b@example.com', password: otherPassword })
-      .expect(201);
+    const userA = await seedAndLogin(app, prisma, {
+      name: 'User A',
+      email: 'a@example.com',
+      password,
+    });
+    const userB = await seedAndLogin(app, prisma, {
+      name: 'User B',
+      email: 'b@example.com',
+      password: otherPassword,
+    });
 
     const meA = await request(app.getHttpServer())
       .get('/api/users/me')
@@ -207,32 +192,32 @@ describe('Auth (e2e)', () => {
     await request(app.getHttpServer()).get('/api/stories').expect(401);
     await request(app.getHttpServer()).get('/api/users/me').expect(401);
 
-    const registered = await request(app.getHttpServer())
-      .post('/api/auth/register')
-      .send({ name: 'Ada', email: 'ada@example.com', password })
-      .expect(201);
+    const loggedIn = await seedAndLogin(app, prisma, {
+      name: 'Ada',
+      email: 'ada@example.com',
+      password,
+    });
 
     await request(app.getHttpServer())
       .get('/api/stories')
-      .set('Authorization', `Bearer ${registered.body.data.accessToken}`)
+      .set('Authorization', `Bearer ${loggedIn.body.data.accessToken}`)
       .expect(200);
 
     await request(app.getHttpServer())
       .get('/api/users/me')
-      .set('Authorization', `Bearer ${registered.body.data.accessToken}`)
+      .set('Authorization', `Bearer ${loggedIn.body.data.accessToken}`)
       .expect(200);
   });
 
-
-
   it('supports logout-all and change-password', async () => {
-    const registered = await request(app.getHttpServer())
-      .post('/api/auth/register')
-      .send({ name: 'Ada', email: 'ada@example.com', password })
-      .expect(201);
+    const loggedIn = await seedAndLogin(app, prisma, {
+      name: 'Ada',
+      email: 'ada@example.com',
+      password,
+    });
 
-    const refresh = extractCookie(registered, 'refresh_token');
-    const access = registered.body.data.accessToken as string;
+    const refresh = extractCookie(loggedIn, 'refresh_token');
+    const access = loggedIn.body.data.accessToken as string;
 
     await request(app.getHttpServer())
       .post('/api/auth/logout-all')

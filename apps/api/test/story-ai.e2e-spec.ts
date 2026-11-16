@@ -7,6 +7,7 @@ import request from 'supertest';
 import type { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/prisma/prisma.service';
+import { seedAndLogin } from './helpers/auth-fixtures';
 import { spawnWorkerProcess } from './spawn-worker';
 
 describe('Story AI Phase 4 (e2e)', () => {
@@ -65,14 +66,16 @@ describe('Story AI Phase 4 (e2e)', () => {
     await prisma.setting.deleteMany();
     await prisma.user.deleteMany();
 
-    const userA = await request(app.getHttpServer())
-      .post('/api/auth/register')
-      .send({ name: 'User A', email: 'story-a@example.com', password })
-      .expect(201);
-    const userB = await request(app.getHttpServer())
-      .post('/api/auth/register')
-      .send({ name: 'User B', email: 'story-b@example.com', password })
-      .expect(201);
+    const userA = await seedAndLogin(app, prisma, {
+      name: 'User A',
+      email: 'story-a@example.com',
+      password: password,
+    });
+    const userB = await seedAndLogin(app, prisma, {
+      name: 'User B',
+      email: 'story-b@example.com',
+      password: password,
+    });
 
     accessTokenA = userA.body.data.accessToken;
     accessTokenB = userB.body.data.accessToken;

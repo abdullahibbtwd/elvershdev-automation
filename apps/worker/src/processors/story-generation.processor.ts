@@ -98,7 +98,9 @@ export function createStoryGenerationProcessor(logger: Logger): Processor {
       await job.updateProgress(70);
 
       const generated = result.data;
-      await applyGeneratedStory(prisma, storyId, data.userId, generated, brief);
+      await applyGeneratedStory(prisma, storyId, data.userId, generated, brief, {
+        preserveCharacters: payload.preserveCharacters === true,
+      });
 
       await prisma.providerUsage.create({
         data: {
@@ -158,6 +160,7 @@ export function createStoryGenerationProcessor(logger: Logger): Processor {
         brief,
         generatedStory: generated,
         forceMock: Boolean(data.useMockAi) || process.env.NODE_ENV === 'test',
+        preserveCharacters: payload.preserveCharacters === true,
         logger,
       });
 
@@ -216,6 +219,7 @@ async function applyGeneratedStory(
   userId: string,
   generated: GeneratedStory,
   brief: StoryBriefInput,
+  options?: { preserveCharacters?: boolean },
 ) {
   await prisma.story.updateMany({
     where: { id: storyId, userId },
@@ -239,20 +243,22 @@ async function applyGeneratedStory(
     },
   });
 
-  await prisma.characterProfile.deleteMany({ where: { storyId } });
-  if (generated.characters.length > 0) {
-    await prisma.characterProfile.createMany({
-      data: generated.characters.map((character) => ({
-        storyId,
-        name: character.name,
-        appearance: character.appearance,
-        clothing: character.clothing,
-        ageRange: character.ageRange,
-        hair: character.hair,
-        distinctiveFeatures: character.distinctiveFeatures,
-        consistencyNotes: character.consistencyNotes,
-      })),
-    });
+  if (!options?.preserveCharacters) {
+    await prisma.characterProfile.deleteMany({ where: { storyId } });
+    if (generated.characters.length > 0) {
+      await prisma.characterProfile.createMany({
+        data: generated.characters.map((character) => ({
+          storyId,
+          name: character.name,
+          appearance: character.appearance,
+          clothing: character.clothing,
+          ageRange: character.ageRange,
+          hair: character.hair,
+          distinctiveFeatures: character.distinctiveFeatures,
+          consistencyNotes: character.consistencyNotes,
+        })),
+      });
+    }
   }
 }
 
@@ -262,6 +268,7 @@ async function enqueueScenePlanning(input: {
   brief: StoryBriefInput;
   generatedStory: GeneratedStory;
   forceMock: boolean;
+  preserveCharacters?: boolean;
   logger: Logger;
 }) {
   const prisma = getPrisma();
@@ -302,6 +309,7 @@ async function enqueueScenePlanning(input: {
           action: 'plan_scenes',
           brief: input.brief,
           generatedStory: input.generatedStory,
+          ...(input.preserveCharacters ? { preserveCharacters: true } : {}),
         } as Prisma.InputJsonValue,
       },
     });
@@ -334,6 +342,7 @@ async function enqueueScenePlanning(input: {
           action: 'plan_scenes',
           brief: input.brief,
           generatedStory: input.generatedStory,
+          ...(input.preserveCharacters ? { preserveCharacters: true } : {}),
         },
         useMockAi: input.forceMock,
       } satisfies GenerationQueuePayload,
