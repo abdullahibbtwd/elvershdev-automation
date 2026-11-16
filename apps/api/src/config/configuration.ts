@@ -40,7 +40,8 @@ export default () => ({
   integrations: {
     geminiApiKey: process.env.GEMINI_API_KEY,
     geminiModel: process.env.GEMINI_MODEL ?? 'gemini-3.8-flash',
-    geminiTimeoutMs: parseInt(process.env.GEMINI_TIMEOUT_MS ?? '60000', 10),
+    // Series movie planning (characters/arc) often needs >60s; 180s avoids false timeouts.
+    geminiTimeoutMs: parseInt(process.env.GEMINI_TIMEOUT_MS ?? '180000', 10),
     geminiMaxRetries: parseInt(process.env.GEMINI_MAX_RETRIES ?? '3', 10),
     geminiUseMock: process.env.GEMINI_USE_MOCK ?? 'false',
     falApiKey: process.env.FAL_API_KEY,
