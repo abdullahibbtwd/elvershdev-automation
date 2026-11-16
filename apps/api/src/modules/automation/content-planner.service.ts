@@ -438,6 +438,7 @@ export class ContentPlannerService {
           ? `Avoid: ${input.config.contentExclusions.join(', ')}`
           : null,
         `Theme: ${input.idea.theme}. Genre: ${input.idea.genre}. Summary: ${input.idea.summary}`,
+        'Language: plain everyday English anyone can understand. Short common words. No poetic or literary wording.',
         'Structure: hook (2–3s) → rising curiosity → emotional/surprising turn → meaningful lesson → soft follow CTA.',
         'Target 6–9 cinematic photoreal scenes. Narration ~45–55s when duration allows.',
         'Hashtags: include 8–15 discovery-friendly tags without # (mix niche + emotional + platform discovery).',

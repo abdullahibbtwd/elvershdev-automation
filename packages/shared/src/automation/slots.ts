@@ -26,9 +26,11 @@ export const DEFAULT_DAILY_SLOTS: DailySlotProfile[] = [
     label: 'Morning · Motivation',
     preferredCategories: ['Personal growth', 'Life lessons', 'Motivation'],
     preferredThemes: ['ambition', 'discipline', 'courage', 'failure and growth', 'patience'],
-    toneHint: 'Inspirational, determined, clear — speak to ambition and resilience',
+    toneHint:
+      'Warm, determined, and clear — everyday spoken English anyone can understand',
     briefInstructions: [
-      'MORNING SLOT: inspirational story about ambition, discipline, courage, failure, or personal growth.',
+      'MORNING SLOT: simple inspirational story about ambition, discipline, courage, failure, or personal growth.',
+      'Use plain everyday English (easy words, short sentences). No poetic or literary wording.',
       'Hook in first 2–3 seconds with a curiosity spike (e.g. "He was one day away from giving up...").',
       'Include a turning point and a practical lesson. Vary endings — do not always say "never give up".',
       'End narration with a soft follow CTA inviting people who want more stories that keep them going.',
@@ -41,11 +43,13 @@ export const DEFAULT_DAILY_SLOTS: DailySlotProfile[] = [
     label: 'Evening · Emotional',
     preferredCategories: ['Human emotions', 'Kindness and humanity', 'Unexpected twists'],
     preferredThemes: ['kindness', 'family', 'sacrifice', 'loneliness', 'hope', 'unexpected life lessons'],
-    toneHint: 'Warm, emotional, reflective — speak to the heart without melodrama',
+    toneHint:
+      'Warm and emotional, but simple — everyday spoken English, not deep or poetic',
     briefInstructions: [
-      'EVENING SLOT: emotional story about kindness, family, sacrifice, loneliness, hope, or an unexpected life lesson.',
+      'EVENING SLOT: simple emotional story about kindness, family, sacrifice, loneliness, hope, or an unexpected life lesson.',
+      'Use plain everyday English (easy words, short sentences). No poetic or literary wording.',
       'Hook in first 2–3 seconds (e.g. "Every night, an old man left his porch light on...").',
-      'Build curiosity, deliver an emotional or surprising turn, then a meaningful lesson.',
+      'Build curiosity, deliver an emotional or surprising turn, then a clear lesson in simple words.',
       'End with a soft follow CTA for more stories with meaning. Prefer shareable emotional payoff over lectures.',
     ].join(' '),
   },

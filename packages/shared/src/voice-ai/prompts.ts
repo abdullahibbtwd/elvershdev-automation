@@ -36,6 +36,8 @@ Hard rules:
 - Preserve meaning and chronology. Do NOT invent events that are not in the approved story/scenes.
 - Prefer approved scene narration text over visual descriptions or image prompts.
 - Write natural spoken language (not screenplay stage directions).
+- Use simple everyday English anyone can understand. Prefer short words and short sentences.
+- Do NOT make the language more poetic, literary, or "deep" than the approved source.
 - Avoid repetitive phrasing across scenes.
 - Keep each scene concise enough for its target duration.
 - Keep character and place names consistent: ${characterNames}.
