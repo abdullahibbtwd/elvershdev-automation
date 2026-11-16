@@ -85,6 +85,14 @@ export function parseSeriesCreativeSettings(raw: unknown): SeriesCreativeSetting
   return parsed.success ? parsed.data : { ...EMPTY_SERIES_CREATIVE_SETTINGS };
 }
 
+/** Clip to Movie Architect Zod max lengths (multi-select themes often exceed theme max). */
+function clipBriefField(value: string | undefined, max: number): string | undefined {
+  if (!value) return undefined;
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  return trimmed.length <= max ? trimmed : trimmed.slice(0, max).trimEnd();
+}
+
 /** Build Movie Architect brief fields from merged creative settings. */
 export function creativeSettingsToBriefFields(settings: SeriesCreativeSettings): {
   genre: string;
@@ -99,12 +107,16 @@ export function creativeSettingsToBriefFields(settings: SeriesCreativeSettings):
   additionalInstructions?: string;
 } {
   const genres = settings.genres.length ? settings.genres : ['Cinematic drama'];
-  const themeParts = [
-    ...settings.themes,
-    settings.storyConcept ? `Concept: ${settings.storyConcept}` : null,
-  ].filter(Boolean) as string[];
+  const themeJoined = [...settings.themes].filter(Boolean).join('; ');
+  const themeOverflow =
+    themeJoined.length > 300 ? `Themes (full): ${themeJoined}` : null;
+  const conceptPart = settings.storyConcept
+    ? `Concept: ${settings.storyConcept}`
+    : null;
 
   const instructionParts = [
+    themeOverflow,
+    conceptPart && themeJoined.length > 200 ? conceptPart : null,
     settings.dialogueStyle ? `Dialogue style: ${settings.dialogueStyle}` : null,
     settings.narrativeTone ? `Narrative tone: ${settings.narrativeTone}` : null,
     settings.storytellingRules.length
@@ -133,18 +145,27 @@ export function creativeSettingsToBriefFields(settings: SeriesCreativeSettings):
     settings.customCreativeInstructions || null,
   ].filter(Boolean) as string[];
 
+  const themePrimary = [
+    ...settings.themes.slice(0, 4),
+    themeJoined.length <= 200 && settings.storyConcept
+      ? `Concept: ${settings.storyConcept}`
+      : null,
+  ]
+    .filter(Boolean)
+    .join('; ');
+
   return {
-    genre: genres[0]!,
-    subgenres: genres.slice(1),
-    theme: themeParts.length ? themeParts.join('; ') : undefined,
-    targetAudience: settings.targetAudience,
-    language: settings.language,
-    tone: settings.tone ?? settings.narrativeTone,
-    visualDirection: settings.visualStyle,
+    genre: clipBriefField(genres[0]!, 100) ?? 'Cinematic drama',
+    subgenres: genres.slice(1).map((g) => clipBriefField(g, 80)!).filter(Boolean),
+    theme: clipBriefField(themePrimary || themeJoined || undefined, 300),
+    targetAudience: clipBriefField(settings.targetAudience, 200),
+    language: clipBriefField(settings.language, 10),
+    tone: clipBriefField(settings.tone ?? settings.narrativeTone, 100),
+    visualDirection: clipBriefField(settings.visualStyle, 500),
     plannedEpisodeCount: settings.episodesPerMovie,
     targetEpisodeDurationSeconds: settings.episodeDurationSeconds,
     additionalInstructions: instructionParts.length
-      ? instructionParts.join('\n')
+      ? clipBriefField(instructionParts.join('\n'), 8000)
       : undefined,
   };
 }

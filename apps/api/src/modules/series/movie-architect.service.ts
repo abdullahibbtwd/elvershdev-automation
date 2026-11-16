@@ -146,22 +146,42 @@ export class MovieArchitectService {
         ? 'custom'
         : 'generate';
 
+    const clip = (value: string | undefined, max: number) => {
+      if (!value) return undefined;
+      const t = value.trim();
+      if (!t) return undefined;
+      return t.length <= max ? t : t.slice(0, max).trimEnd();
+    };
+    // UI multi-select themes / saved creative settings often exceed brief Zod maxes.
+    const rawTheme = dto.theme ?? fromCreative.theme;
+    const themeOverflow =
+      rawTheme && rawTheme.length > 300
+        ? `Themes (full): ${rawTheme}`
+        : undefined;
     const brief = movieArchitectBriefSchema.parse({
-      genre: dto.genre ?? fromCreative.genre ?? 'Cinematic drama',
-      subgenres: dto.subgenres?.length
+      genre: clip(dto.genre ?? fromCreative.genre ?? 'Cinematic drama', 100),
+      subgenres: (dto.subgenres?.length
         ? dto.subgenres
-        : fromCreative.subgenres ?? [],
-      theme: dto.theme ?? fromCreative.theme,
-      targetAudience:
+        : fromCreative.subgenres ?? []
+      )
+        .map((s) => clip(s, 80)!)
+        .filter(Boolean)
+        .slice(0, 8),
+      theme: clip(rawTheme, 300),
+      targetAudience: clip(
         dto.targetAudience ??
-        fromCreative.targetAudience ??
-        'Adult viewers who enjoy premium serialized drama',
-      language: fromCreative.language ?? config.language,
-      tone: fromCreative.tone ?? config.tone ?? SERIES_DEFAULTS.tone,
-      visualDirection:
+          fromCreative.targetAudience ??
+          'Adult viewers who enjoy premium serialized drama',
+        200,
+      ),
+      language: clip(fromCreative.language ?? config.language, 10),
+      tone: clip(fromCreative.tone ?? config.tone ?? SERIES_DEFAULTS.tone, 100),
+      visualDirection: clip(
         fromCreative.visualDirection ??
-        config.visualDirection ??
-        SERIES_DEFAULTS.visualDirection,
+          config.visualDirection ??
+          SERIES_DEFAULTS.visualDirection,
+        500,
+      ),
       plannedEpisodeCount:
         dto.plannedEpisodeCount ??
         fromCreative.plannedEpisodeCount ??
@@ -172,11 +192,13 @@ export class MovieArchitectService {
         fromCreative.targetEpisodeDurationSeconds ??
         lane.targetEpisodeDurationSeconds ??
         config.defaultEpisodeDurationSeconds,
-      additionalInstructions:
-        [fromCreative.additionalInstructions, dto.additionalInstructions]
+      additionalInstructions: clip(
+        [themeOverflow, fromCreative.additionalInstructions, dto.additionalInstructions]
           .filter(Boolean)
           .join('\n') || undefined,
-      customPremise: dto.customPremise?.trim() || undefined,
+        8000,
+      ),
+      customPremise: clip(dto.customPremise?.trim() || undefined, 12000),
       ideaMode,
     });
 

@@ -39,4 +39,24 @@ describe('series creative settings', () => {
     expect(fields.plannedEpisodeCount).toBe(8);
     expect(fields.additionalInstructions).toContain('Cliffhanger intensity: high');
   });
+
+  it('keeps theme within Movie Architect max when many themes are selected', () => {
+    const many = [
+      'Jealousy',
+      'Greed',
+      'Family conflict',
+      'Favouritism',
+      'Inheritance disputes',
+      'Manipulation',
+      'Hidden secrets',
+      'Deception',
+      'Power struggles',
+      'Sibling rivalry',
+    ];
+    const fields = creativeSettingsToBriefFields(
+      seriesCreativeSettingsSchema.parse({ themes: many }),
+    );
+    expect(fields.theme!.length).toBeLessThanOrEqual(300);
+    expect(fields.additionalInstructions).toContain('Themes (full):');
+  });
 });

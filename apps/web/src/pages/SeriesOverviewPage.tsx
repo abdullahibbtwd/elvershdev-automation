@@ -466,8 +466,15 @@ export function SeriesOverviewPage() {
       return seriesApi.generate({
         laneId: targetLaneId,
         genre: selectedGenres[0],
-        theme: selectedThemes.join('; ') || undefined,
-        additionalInstructions: instructions || undefined,
+        theme: selectedThemes.slice(0, 4).join('; ') || undefined,
+        additionalInstructions: [
+          selectedThemes.length > 4
+            ? `Themes (full): ${selectedThemes.join('; ')}`
+            : null,
+          instructions || null,
+        ]
+          .filter(Boolean)
+          .join('\n') || undefined,
         customPremise: ideaMode === 'custom' ? customPremise : undefined,
         ideaMode,
         useMockAi,
