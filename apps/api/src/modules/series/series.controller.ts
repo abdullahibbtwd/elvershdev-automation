@@ -311,7 +311,14 @@ export class SeriesController {
         runMode: config.runMode,
         canScheduleNewWork: this.configService.canScheduleNewWork(config),
         cronDisabled: process.env.SERIES_CRON_DISABLED === 'true',
+        /** Env kill-switch only — does not mean this HTTP process runs workers. */
         queuesHosted: process.env.SERIES_QUEUE_HOST_DISABLED !== 'true',
+        processRole: process.env.PROCESS_ROLE ?? 'all',
+        queueHostsOnThisProcess:
+          (process.env.PROCESS_ROLE ?? 'all') === 'all' ||
+          (process.env.PROCESS_ROLE ?? 'all') === 'scheduler',
+        topologyHint:
+          'api enqueues PLAN_MOVIE; api-scheduler must log "Series queue host listening" or Active movie stays None',
         phase: 'G',
         lockKey: 'cron:series',
         queues: [

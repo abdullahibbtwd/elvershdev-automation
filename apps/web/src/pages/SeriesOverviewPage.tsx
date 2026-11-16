@@ -571,12 +571,22 @@ export function SeriesOverviewPage() {
                 : 'Idle'
           }
         />
+        <Stat
+          label="API process role"
+          value={String(statusQuery.data?.processRole ?? '…')}
+        />
       </div>
       <p className="text-sm text-muted-foreground">
         Monitoring centre — configure creative direction and autonomy in Settings. Routine approvals
         are not required in Fully Autonomous Mode. Exceptional controls: pause lane, retry, emergency
         stop.
       </p>
+      {statusQuery.data?.topologyHint ? (
+        <p className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-950 dark:text-amber-100">
+          {String(statusQuery.data.topologyHint)} Queued PLAN_MOVIE is not a finished plan — check{' '}
+          <strong>api-scheduler</strong> logs for <code>Series queue host listening</code>.
+        </p>
+      ) : null}
 
       <div className="flex flex-wrap gap-2">
         <Button disabled={control.isPending} onClick={() => control.mutate('enable')}>

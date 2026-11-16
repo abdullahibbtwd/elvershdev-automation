@@ -173,15 +173,22 @@ export class SeriesExecutionService {
         dto,
         execution.id,
       );
+      // Async queue handoff is QUEUED until api-scheduler workers finish — do not
+      // mark COMPLETED on enqueue (that made prod look "done" with Active movie: None).
+      const queuedOnly = result.queued === true;
       const updated = await this.prisma.seriesExecution.update({
         where: { id: execution.id },
         data: {
-          status: SeriesExecutionStatus.COMPLETED,
-          completedAt: new Date(),
+          status: queuedOnly
+            ? SeriesExecutionStatus.QUEUED
+            : SeriesExecutionStatus.COMPLETED,
+          completedAt: queuedOnly ? null : new Date(),
           queueJobIds: (result.queueJobIds ?? []) as Prisma.InputJsonValue,
           resultSummary: {
             reason: resolved.reason,
             displayState: resolved.displayState,
+            queuedOnly,
+            awaitingSchedulerWorker: queuedOnly,
             ...result.summary,
           } as Prisma.InputJsonValue,
           seriesId: result.seriesId ?? resolved.seriesId,
@@ -545,6 +552,9 @@ export class SeriesExecutionService {
           setAsActive: true,
         });
 
+        const queued =
+          Boolean((generated as { queued?: boolean }).queued) ||
+          dto.async !== false;
         await this.prisma.seriesExecution.create({
           data: {
             userId,
@@ -552,14 +562,21 @@ export class SeriesExecutionService {
             triggerSource: SeriesExecutionTrigger.MANUAL,
             requestedAction: SeriesExecutionAction.PLAN_MOVIE,
             resolvedAction: SeriesExecutionAction.PLAN_MOVIE,
-            status: SeriesExecutionStatus.COMPLETED,
+            status: queued
+              ? SeriesExecutionStatus.QUEUED
+              : SeriesExecutionStatus.COMPLETED,
             seriesId: (generated as { series?: { id: string } }).series?.id,
+            queueJobIds: [(generated as { jobId?: string }).jobId].filter(
+              Boolean,
+            ) as Prisma.InputJsonValue,
             idempotencyKey: `plan-movies:${target.laneId}:${Date.now()}`,
             startedAt: new Date(),
-            completedAt: new Date(),
+            completedAt: queued ? null : new Date(),
             resultSummary: {
               startMediaProduction: startMedia,
               planOnly: !startMedia,
+              queuedOnly: queued,
+              awaitingSchedulerWorker: queued,
             } as Prisma.InputJsonValue,
             metadata: {
               workflow: 'plan_movies_in_advance',

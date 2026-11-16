@@ -1,5 +1,6 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { SeriesExecutionStatus, Prisma } from '@prisma/client';
 import {
   QUEUE_NAMES,
   type SeriesCharacterGenerationPayload,
@@ -14,6 +15,7 @@ import {
 import { Job, Worker } from 'bullmq';
 import IORedis from 'ioredis';
 import { shouldRunQueueHosts } from '../../common/process-role';
+import { PrismaService } from '../../prisma/prisma.service';
 import { CharacterDirectorService } from './character-director.service';
 import { ContinuityEngineService } from './continuity-engine.service';
 import { EpisodeDirectorService } from './episode-director.service';
@@ -36,6 +38,7 @@ export class SeriesQueueHost implements OnModuleInit, OnModuleDestroy {
 
   constructor(
     private readonly config: ConfigService,
+    private readonly prisma: PrismaService,
     private readonly architect: MovieArchitectService,
     private readonly characters: CharacterDirectorService,
     private readonly episodes: EpisodeDirectorService,
@@ -45,6 +48,43 @@ export class SeriesQueueHost implements OnModuleInit, OnModuleDestroy {
     private readonly orchestrator: SeriesOrchestratorService,
     private readonly maintenance: SeriesMaintenanceService,
   ) {}
+
+  private async settleStoryPlanningExecution(
+    job: Job | undefined,
+    outcome: 'COMPLETED' | 'FAILED',
+    errorMessage?: string,
+    seriesId?: string,
+  ) {
+    const jobId = job?.id != null ? String(job.id) : null;
+    if (!jobId) return;
+    try {
+      await this.prisma.seriesExecution.updateMany({
+        where: {
+          status: {
+            in: [SeriesExecutionStatus.QUEUED, SeriesExecutionStatus.RUNNING],
+          },
+          queueJobIds: { array_contains: [jobId] },
+        },
+        data: {
+          status:
+            outcome === 'COMPLETED'
+              ? SeriesExecutionStatus.COMPLETED
+              : SeriesExecutionStatus.FAILED,
+          completedAt: new Date(),
+          errorMessage: errorMessage?.slice(0, 2000) ?? null,
+          ...(seriesId ? { seriesId } : {}),
+          resultSummary: {
+            awaitingSchedulerWorker: false,
+            workerOutcome: outcome,
+          } as Prisma.InputJsonValue,
+        },
+      });
+    } catch (error) {
+      this.logger.warn(
+        `Could not settle SeriesExecution for job ${jobId}: ${(error as Error).message}`,
+      );
+    }
+  }
 
   async onModuleInit() {
     if (!shouldRunQueueHosts()) {
@@ -73,12 +113,19 @@ export class SeriesQueueHost implements OnModuleInit, OnModuleDestroy {
             asReplacementCandidate: false,
             setAsActive: true,
           };
-          return this.architect.planAndPersist(job.data.userId, {
+          const planned = await this.architect.planAndPersist(job.data.userId, {
             ...request,
             laneId: job.data.laneId,
             useMockAi: job.data.useMockAi ?? request.useMockAi,
             async: false,
           });
+          await this.settleStoryPlanningExecution(
+            job,
+            'COMPLETED',
+            undefined,
+            (planned as { id?: string } | null)?.id,
+          );
+          return planned;
         },
         { connection: this.connection, concurrency: 1 },
       ),
@@ -203,6 +250,9 @@ export class SeriesQueueHost implements OnModuleInit, OnModuleDestroy {
         this.logger.error(
           `Series job ${job?.name}/${job?.id} failed: ${error.message}`,
         );
+        if (worker.name === QUEUE_NAMES.SERIES_STORY_PLANNING) {
+          void this.settleStoryPlanningExecution(job, 'FAILED', error.message);
+        }
       });
     }
 
