@@ -47,7 +47,7 @@ function LaneCard({
   onChanged: () => void;
 }) {
   const [confirmRun, setConfirmRun] = useState(false);
-  const [useMockAi, setUseMockAi] = useState(true);
+  const [useMockAi, setUseMockAi] = useState(false);
 
   const execView = useQuery({
     queryKey: ['series', 'lane-exec', lane.id],
@@ -346,7 +346,7 @@ export function SeriesOverviewPage() {
   const [selectedGenres, setSelectedGenres] = useState<string[]>(['Cinematic drama']);
   const [selectedThemes, setSelectedThemes] = useState<string[]>([]);
   const [instructions, setInstructions] = useState('');
-  const [useMockAi, setUseMockAi] = useState(true);
+  const [useMockAi, setUseMockAi] = useState(false);
   const [newLaneName, setNewLaneName] = useState('');
 
   const configQuery = useQuery({
@@ -404,7 +404,7 @@ export function SeriesOverviewPage() {
   });
 
   const runAll = useMutation({
-    mutationFn: () => seriesApi.runAllNow({ useMockAi: true }),
+    mutationFn: () => seriesApi.runAllNow({ useMockAi }),
     onSuccess: (data) => {
       toast.success('Run All evaluated', { description: data.message });
       invalidate();

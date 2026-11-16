@@ -6,6 +6,13 @@ function asString(value: unknown, fallback = ''): string {
   return fallback;
 }
 
+/** Gemini often overshoots short visual fields; truncate before Zod so plans don't FAIL. */
+function asBoundedString(value: unknown, max: number, fallback = ''): string {
+  const raw = asString(value, fallback).trim();
+  if (!raw) return fallback;
+  return raw.length <= max ? raw : raw.slice(0, max).trimEnd();
+}
+
 function asStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value.map((item) => asString(item)).filter(Boolean);
@@ -49,23 +56,23 @@ export function normalizeMovieCharactersPlanInput(raw: unknown): unknown {
     characters: list.map((item) => {
       const c = (item && typeof item === 'object' ? item : {}) as Record<string, unknown>;
       return {
-        name: asString(c.name),
+        name: asBoundedString(c.name, 100),
         role: asString(c.role, 'SUPPORTING').toUpperCase(),
-        species: asString(c.species, 'human'),
-        ageRange: asString(c.ageRange ?? c.age_range, 'adult'),
+        species: asBoundedString(c.species, 100, 'human'),
+        ageRange: asBoundedString(c.ageRange ?? c.age_range, 50, 'adult'),
         personality: asString(c.personality),
         motivation: asString(c.motivation),
         backstory: asString(c.backstory),
         physicalDescription: asString(c.physicalDescription ?? c.physical_description),
         facialStructure: asString(c.facialStructure ?? c.facial_structure),
-        eyeColor: asString(c.eyeColor ?? c.eye_color),
-        eyeShape: asString(c.eyeShape ?? c.eye_shape),
-        hairFurColor: asString(c.hairFurColor ?? c.hair_fur_color),
+        eyeColor: asBoundedString(c.eyeColor ?? c.eye_color, 80),
+        eyeShape: asBoundedString(c.eyeShape ?? c.eye_shape, 80),
+        hairFurColor: asBoundedString(c.hairFurColor ?? c.hair_fur_color, 120),
         markings: asString(c.markings, 'none'),
         bodyProportions: asString(c.bodyProportions ?? c.body_proportions),
         clothing: asString(c.clothing),
         accessories: asString(c.accessories, 'none'),
-        heightRelative: asString(c.heightRelative ?? c.height_relative),
+        heightRelative: asBoundedString(c.heightRelative ?? c.height_relative, 200),
         voiceProfile: asString(c.voiceProfile ?? c.voice_profile),
         emotionalCharacteristics: asString(
           c.emotionalCharacteristics ?? c.emotional_characteristics,
