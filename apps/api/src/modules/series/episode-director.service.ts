@@ -136,7 +136,7 @@ export class EpisodeDirectorService {
       );
       const meta = (episode.metadata ?? {}) as Record<string, unknown>;
 
-      const plan = await this.generateScriptPlan({
+      const planInput = {
         seriesTitle: series.title,
         plannedEpisodeCount: series.plannedEpisodeCount,
         targetDurationSeconds:
@@ -154,9 +154,10 @@ export class EpisodeDirectorService {
         userId,
         seriesId,
         episodeId,
-      });
+      };
 
-      const validation = await this.continuity.validateEpisode({
+      let plan = await this.generateScriptPlan(planInput);
+      let validation = await this.continuity.validateEpisode({
         userId,
         seriesId,
         episodeId,
@@ -164,6 +165,25 @@ export class EpisodeDirectorService {
         plan,
         useMockAi: options?.useMockAi,
       });
+
+      // One automatic rewrite with continuity feedback before failing the episode.
+      if (!validation.valid) {
+        const revisionNotes = validation.issues
+          .map((i) => `- [${i.severity}] ${i.code}: ${i.message}${i.suggestedFix ? ` Fix: ${i.suggestedFix}` : ''}`)
+          .join('\n');
+        this.logger.warn(
+          `Episode ${episode.episodeNumber} continuity failed (${validation.issues.length} issues) — retrying once`,
+        );
+        plan = await this.generateScriptPlan({ ...planInput, revisionNotes });
+        validation = await this.continuity.validateEpisode({
+          userId,
+          seriesId,
+          episodeId,
+          stage: 'pre_script_approval',
+          plan,
+          useMockAi: options?.useMockAi,
+        });
+      }
 
       if (!validation.valid) {
         await this.prisma.seriesEpisode.update({
@@ -397,6 +417,7 @@ export class EpisodeDirectorService {
     userId: string;
     seriesId: string;
     episodeId: string;
+    revisionNotes?: string;
   }): Promise<EpisodeScriptPlan> {
     const useMock = input.useMockAi === true || this.gemini.shouldUseMock();
     if (useMock) {
@@ -442,6 +463,7 @@ export class EpisodeDirectorService {
       unresolvedMysteries: input.context.unresolvedMysteries,
       relationshipsDigest: input.context.relationshipsDigest,
       visualRefsDigest: input.context.visualRefsDigest,
+      revisionNotes: input.revisionNotes,
     });
 
     const result = await this.gemini.generateJson(

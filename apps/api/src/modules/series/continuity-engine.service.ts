@@ -311,7 +311,11 @@ export class ContinuityEngineService {
         },
       });
       modelResult = result.data;
-      modelResult.issues = [...localIssues, ...modelResult.issues];
+      // Gemini often marks in-scene discoveries / minor staging as errors — soften those.
+      modelResult.issues = [
+        ...localIssues,
+        ...modelResult.issues.map((issue) => softenGeminiContinuityIssue(issue)),
+      ];
       modelResult.valid =
         modelResult.issues.filter((i) => i.severity === 'error').length === 0;
       if (!modelResult.valid && !modelResult.summary.includes('error')) {
@@ -634,6 +638,43 @@ export class ContinuityEngineService {
 
     return base;
   }
+}
+
+/** Gemini often elevates soft craft notes to errors; keep hard canon breaks as errors. */
+function softenGeminiContinuityIssue(
+  issue: ContinuityValidationResult['issues'][number],
+): ContinuityValidationResult['issues'][number] {
+  if (issue.severity !== 'error') return issue;
+  const code = issue.code.toLowerCase();
+  const hard =
+    code.includes('unknown_character') ||
+    code.includes('identity') ||
+    code.includes('appearance') ||
+    code === 'knowledge_violation' ||
+    code.includes('ending_spoil') ||
+    code.includes('wrong_ending');
+  if (hard) return issue;
+
+  const soft =
+    code.includes('knowledge_leak') ||
+    code.includes('state_discrepancy') ||
+    code.includes('staging') ||
+    code.includes('pacing') ||
+    code.includes('tone') ||
+    /learn(?:s|ed|ing).*(?:in (?:this|the) (?:scene|conversation)|via dialogue|when .{0,40}(?:tell|show|reveal))/i.test(
+      issue.message,
+    );
+
+  if (soft) {
+    return {
+      ...issue,
+      severity: 'warning',
+      suggestedFix:
+        issue.suggestedFix ??
+        'Treated as warning: in-scene discovery / minor staging is allowed.',
+    };
+  }
+  return issue;
 }
 
 function truncate(value: string, max: number): string {

@@ -88,6 +88,104 @@ describe('ContinuityEngineService stored validation trust', () => {
   });
 });
 
+describe('ContinuityEngineService Gemini soft issues', () => {
+  it('downgrades CHARACTER_KNOWLEDGE_LEAK errors so in-scene discovery does not fail generation', async () => {
+    const prisma = {
+      seriesEpisode: {
+        findFirst: jest.fn(async () => ({
+          id: 'ep-1',
+          episodeNumber: 1,
+          title: 'Ep 1',
+          synopsis: 's',
+          hook: 'h',
+          narrationText: 'n',
+          script: 'Elena learns the filing when Arthur tells her in the shed.',
+          ending: 'e',
+          cliffhanger: 'c',
+          nextEpisodeSetup: 'n',
+          spokenWordCount: 120,
+          continuityChanges: {
+            characterStateUpdates: [],
+            relationshipUpdates: [],
+            locationUpdates: [],
+            objectOwnershipUpdates: [],
+            newMysteries: [],
+            resolvedMysteries: [],
+            knowledgeUpdates: [],
+          },
+          metadata: {},
+          scenes: [
+            {
+              sceneOrder: 1,
+              location: 'Shed',
+              characters: ['Elena Vance', 'Arthur Vance'],
+              action: 'talk',
+              visualDescription: 'v',
+              dialogue: 'd',
+              narration: 'n',
+              emotionalDirection: 'tense',
+              shotDirection: 'wide',
+            },
+          ],
+        })),
+      },
+      providerUsage: { create: jest.fn(async () => ({})) },
+    };
+    const gemini = {
+      shouldUseMock: jest.fn(() => false),
+      generateJson: jest.fn(async () => ({
+        data: {
+          valid: false,
+          stage: 'pre_script_approval',
+          summary: 'Continuity errors detected.',
+          issues: [
+            {
+              code: 'CHARACTER_KNOWLEDGE_LEAK',
+              severity: 'error',
+              message:
+                'Elena Vance references Arthur filing before she inspects docs, despite the filing taking place only six minutes prior to her arrival.',
+            },
+            {
+              code: 'CHARACTER_STATE_DISCREPANCY',
+              severity: 'warning',
+              message: 'Arthur is upright instead of bedridden.',
+            },
+          ],
+        },
+        usage: { model: 'mock', inputTokens: 1, outputTokens: 1, estimatedCostUsd: 0 },
+        rawText: '{}',
+      })),
+    };
+    const service = new ContinuityEngineService(prisma as never, gemini as never);
+    jest.spyOn(service, 'buildCompactContext' as never).mockResolvedValue({
+      series: {
+        title: 'Series',
+        characters: [
+          { name: 'Elena Vance', canonicalVisualDescription: 'human' },
+          { name: 'Arthur Vance', canonicalVisualDescription: 'human' },
+        ],
+      },
+      bibleDigest: '',
+      characterDigest: '',
+      continuityDigest: '',
+      memoryDigest: '',
+      snapshotState: createEmptyContinuitySnapshot(),
+      memoryEvents: [],
+      characterNameToId: { 'Elena Vance': 'c1', 'Arthur Vance': 'c2' },
+    } as never);
+
+    const result = await service.validateEpisode({
+      userId: 'u1',
+      seriesId: 's1',
+      episodeId: 'ep-1',
+      stage: 'pre_script_approval',
+    });
+
+    expect(result.valid).toBe(true);
+    expect(result.issues.every((i) => i.severity === 'warning')).toBe(true);
+  });
+});
+
 describe('ContinuityEngineService.runLocalChecks', () => {
   const service = Object.create(ContinuityEngineService.prototype) as ContinuityEngineService;
 

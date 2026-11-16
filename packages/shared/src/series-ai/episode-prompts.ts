@@ -19,6 +19,8 @@ export function buildEpisodeScriptPrompt(input: {
   unresolvedMysteries: string;
   relationshipsDigest: string;
   visualRefsDigest: string;
+  /** Prior continuity failures to fix on regenerate/retry. */
+  revisionNotes?: string;
 }): string {
   const wordMin = Math.round(
     (SERIES_DEFAULTS.spokenWordsPerSixtySecondsMin * input.targetDurationSeconds) / 60,
@@ -31,6 +33,7 @@ export function buildEpisodeScriptPrompt(input: {
     'You are the Episode Director for a cinematic episodic drama series.',
     'Write ONE interconnected episode of a complete movie — not a standalone short story.',
     'Respect canon: characters must not know secrets they have not discovered.',
+    'Characters MAY learn facts in-scene when another character tells them or evidence is shown — that is not a leak.',
     'Do not change approved character appearance or identity.',
     'Visual direction: mature premium cinematic 3D animation.',
     'Return ONE JSON object only. No markdown fences.',
@@ -46,6 +49,9 @@ export function buildEpisodeScriptPrompt(input: {
     input.outlineKeyPlot ? `Key plot development: ${input.outlineKeyPlot}` : '',
     input.outlineCliffhanger ? `Planned ending/cliffhanger: ${input.outlineCliffhanger}` : '',
     input.outlineNextSetup ? `Next episode setup: ${input.outlineNextSetup}` : '',
+    input.revisionNotes
+      ? `\nRevision required — fix these continuity notes:\n${input.revisionNotes}\n`
+      : '',
     '',
     'Series bible digest:',
     input.bibleDigest,
@@ -100,11 +106,16 @@ export function buildContinuityValidationPrompt(input: {
   return [
     'You are the Continuity Validator for a cinematic episodic series.',
     `Validation stage: ${input.stage}`,
-    'Detect contradictions with established canon. Do not rewrite canon.',
-    'Characters must not know information they have not discovered.',
+    'Detect HARD contradictions with established canon. Do not rewrite canon.',
+    'Characters must not already know secrets they have never discovered.',
+    'IMPORTANT — do NOT mark as severity=error:',
+    '- A character learning a fact in THIS scene via dialogue, documents, or visible evidence.',
+    '- Minor staging differences from bible prose (e.g. bedridden vs seated in same room) — use warning.',
+    '- Stylistic or pacing preferences.',
+    'Reserve severity=error for: unknown cast names, identity/appearance flips, knowing restricted secrets with no discovery beat, spoiling the locked ending early.',
     'Return ONE JSON object: valid, stage, issues[], summary.',
     'Each issue: code, severity (error|warning), message, optional conflictingEvent, optional suggestedFix.',
-    'Set valid=false if any severity=error issues exist.',
+    'Set valid=false only if any severity=error issues exist.',
     '',
     `Series: ${input.seriesTitle}`,
     `Episode: ${input.episodeNumber}`,
