@@ -87,6 +87,10 @@ export class SeriesQueueHost implements OnModuleInit, OnModuleDestroy {
   }
 
   async onModuleInit() {
+    const role = process.env.PROCESS_ROLE ?? 'all';
+    this.logger.log(
+      `Series queue host init begin (PROCESS_ROLE=${role}, disabled=${process.env.SERIES_QUEUE_HOST_DISABLED ?? 'false'})`,
+    );
     if (!shouldRunQueueHosts()) {
       this.logger.log('Series queue host skipped (PROCESS_ROLE does not own queue hosts)');
       return;
@@ -96,6 +100,7 @@ export class SeriesQueueHost implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
+    try {
     this.connection = new IORedis({
       host: this.config.get<string>('redis.host', 'localhost'),
       port: this.config.get<number>('redis.port', 6379),
@@ -259,6 +264,13 @@ export class SeriesQueueHost implements OnModuleInit, OnModuleDestroy {
     this.logger.log(
       `Series queue host listening on ${this.workers.map((w) => w.name).join(', ')}`,
     );
+    } catch (error) {
+      this.logger.error(
+        `Series queue host failed to start: ${(error as Error).message}`,
+        (error as Error).stack,
+      );
+      throw error;
+    }
   }
 
   async onModuleDestroy() {
