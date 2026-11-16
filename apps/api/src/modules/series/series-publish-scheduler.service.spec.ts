@@ -1,5 +1,32 @@
 import { PublishStatus, SocialConnectionStatus, SocialPlatform } from '@prisma/client';
-import { DEFAULT_CAPABILITIES } from '@ai-video/shared';
+import {
+  DEFAULT_CAPABILITIES,
+  buildSeriesEpisodePostCaption,
+  buildSeriesEpisodePostTitle,
+} from '@ai-video/shared';
+
+describe('Series episode post title/caption', () => {
+  it('includes episode number and name on every post', () => {
+    expect(
+      buildSeriesEpisodePostTitle({
+        episodeNumber: 1,
+        episodeTitle: 'The Shoal of Scylla',
+        plannedEpisodeCount: 10,
+      }),
+    ).toBe('Ep 1/10: The Shoal of Scylla');
+
+    const caption = buildSeriesEpisodePostCaption({
+      seriesTitle: 'A Fragile Threshold',
+      episodeNumber: 1,
+      episodeTitle: 'The Shoal of Scylla',
+      plannedEpisodeCount: 10,
+      body: 'Julian arrives under fog.',
+    });
+    expect(caption.startsWith('Ep 1/10: The Shoal of Scylla')).toBe(true);
+    expect(caption).toContain('A Fragile Threshold');
+    expect(caption).toContain('Julian arrives under fog.');
+  });
+});
 
 describe('Series publish eligibility helpers', () => {
   function evaluateEligibility(channel: {

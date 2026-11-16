@@ -13,6 +13,8 @@ import {
   DEFAULT_CAPABILITIES,
   QUEUE_NAMES,
   SERIES_NOTIFICATION_TYPES,
+  buildSeriesEpisodePostCaption,
+  buildSeriesEpisodePostTitle,
   buildViralHashtags,
   computeNextPublishAt,
   seriesPublishJobId,
@@ -243,7 +245,14 @@ export class SeriesPublishSchedulerService {
         episode: {
           include: {
             story: true,
-            series: { select: { title: true, genre: true, slug: true } },
+            series: {
+              select: {
+                title: true,
+                genre: true,
+                slug: true,
+                plannedEpisodeCount: true,
+              },
+            },
           },
         },
         lane: true,
@@ -524,7 +533,19 @@ export class SeriesPublishSchedulerService {
   private async handoffLivePublish(
     schedule: Prisma.SeriesScheduleGetPayload<{
       include: {
-        episode: { include: { story: true; series: { select: { title: true; genre: true; slug: true } } } };
+        episode: {
+          include: {
+            story: true;
+            series: {
+              select: {
+                title: true;
+                genre: true;
+                slug: true;
+                plannedEpisodeCount: true;
+              };
+            };
+          };
+        };
         lane: true;
       };
     }>,
@@ -630,6 +651,25 @@ export class SeriesPublishSchedulerService {
           ? 'evening'
           : null;
 
+    const postTitle = buildSeriesEpisodePostTitle({
+      episodeNumber: schedule.episode.episodeNumber,
+      episodeTitle: schedule.episode.title,
+      plannedEpisodeCount: series.plannedEpisodeCount,
+    });
+    const captionBody =
+      story?.description?.trim() ||
+      schedule.episode.synopsis?.trim() ||
+      story?.openingHook?.trim() ||
+      schedule.episode.hook?.trim() ||
+      '';
+    const caption = buildSeriesEpisodePostCaption({
+      seriesTitle: series.title,
+      episodeNumber: schedule.episode.episodeNumber,
+      episodeTitle: schedule.episode.title,
+      plannedEpisodeCount: series.plannedEpisodeCount,
+      body: captionBody,
+    });
+
     const targets = eligible.map((channel) => {
       const hashtags = buildViralHashtags({
         platform: channel.platform,
@@ -638,18 +678,12 @@ export class SeriesPublishSchedulerService {
           : ['series', series.slug],
         category: series.genre ?? undefined,
         theme: series.title,
-        title: schedule.episode.title,
+        title: postTitle,
         slotKind,
       });
-      const caption =
-        story?.description?.trim() ||
-        schedule.episode.synopsis?.trim() ||
-        story?.openingHook?.trim() ||
-        schedule.episode.hook?.trim() ||
-        schedule.episode.title;
       return {
         channelId: channel.id,
-        title: schedule.episode.title,
+        title: postTitle,
         caption,
         description: caption,
         hashtags,
