@@ -35,11 +35,54 @@ export function computeNextPublishAt(
     return todayAt;
   }
 
-  // Advance one local calendar day using noon anchor to avoid DST edge ambiguity.
-  const local = getZonedParts(now, timeZone);
-  const noonUtc = Date.UTC(local.year, local.month - 1, local.day, 12, 0, 0);
-  const nextLocalDate = formatDateInTimeZone(new Date(noonUtc + 36 * 60 * 60 * 1000), timeZone);
+  // Advance one local calendar day using the lane's local noon (not Date.UTC civil parts),
+  // so we never skip a day for positive-offset timezones like Africa/Lagos.
+  const localNoon = zonedDateTimeToUtc(today, '12:00', timeZone);
+  const nextLocalDate = formatDateInTimeZone(
+    new Date(localNoon.getTime() + 24 * 60 * 60 * 1000),
+    timeZone,
+  );
   return zonedDateTimeToUtc(nextLocalDate, publishTime, timeZone);
+}
+
+/**
+ * Resolve the next exclusive daily publish slot for a lane.
+ * Never reuses a slot already taken by lane.nextPublishAt reservation or an existing schedule.
+ * Guarantees at most one episode per local publish day.
+ */
+export function resolveLanePublishSlot(input: {
+  now: Date;
+  timeZone: string;
+  publishTime: string;
+  /** Reserved future slot on the lane (may already be advanced after prior schedule/publish). */
+  laneNextPublishAt?: Date | null;
+  /** Latest scheduledAt among non-cancelled schedules for this lane. */
+  latestScheduledAt?: Date | null;
+}): Date {
+  let slot = computeNextPublishAt(input.now, input.timeZone, input.publishTime);
+
+  if (
+    input.laneNextPublishAt &&
+    Number.isFinite(input.laneNextPublishAt.getTime()) &&
+    input.laneNextPublishAt.getTime() > input.now.getTime() &&
+    input.laneNextPublishAt.getTime() > slot.getTime()
+  ) {
+    slot = input.laneNextPublishAt;
+  }
+
+  if (input.latestScheduledAt && Number.isFinite(input.latestScheduledAt.getTime())) {
+    // Day after the latest used/planned slot (works when latest equals an exact publish instant).
+    const afterLatest = computeNextPublishAt(
+      input.latestScheduledAt,
+      input.timeZone,
+      input.publishTime,
+    );
+    if (afterLatest.getTime() > slot.getTime()) {
+      slot = afterLatest;
+    }
+  }
+
+  return slot;
 }
 
 /**
@@ -84,10 +127,9 @@ export function computeNextProductionAt(
   // If production clock is after publish on the same calendar day (lead wrap),
   // production belongs on the previous local day relative to that publish.
   if (productionAt.getTime() > nextPublish.getTime()) {
-    const parts = getZonedParts(nextPublish, timeZone);
-    const noonUtc = Date.UTC(parts.year, parts.month - 1, parts.day, 12, 0, 0);
+    const publishLocalNoon = zonedDateTimeToUtc(publishLocalDate, '12:00', timeZone);
     const prevLocalDate = formatDateInTimeZone(
-      new Date(noonUtc - 12 * 60 * 60 * 1000),
+      new Date(publishLocalNoon.getTime() - 24 * 60 * 60 * 1000),
       timeZone,
     );
     productionAt = zonedDateTimeToUtc(prevLocalDate, clock, timeZone);
@@ -140,10 +182,9 @@ export function isLaneProductionEligible(input: ProductionEligibilityInput): boo
   const publishLocalDate = formatDateInTimeZone(nextPublish, input.timeZone);
   let windowOpen = zonedDateTimeToUtc(publishLocalDate, clock, input.timeZone);
   if (windowOpen.getTime() > nextPublish.getTime()) {
-    const parts = getZonedParts(nextPublish, input.timeZone);
-    const noonUtc = Date.UTC(parts.year, parts.month - 1, parts.day, 12, 0, 0);
+    const publishLocalNoon = zonedDateTimeToUtc(publishLocalDate, '12:00', input.timeZone);
     const prevLocalDate = formatDateInTimeZone(
-      new Date(noonUtc - 12 * 60 * 60 * 1000),
+      new Date(publishLocalNoon.getTime() - 24 * 60 * 60 * 1000),
       input.timeZone,
     );
     windowOpen = zonedDateTimeToUtc(prevLocalDate, clock, input.timeZone);
@@ -191,6 +232,19 @@ export function seriesMaintenanceJobId(mode: string, minuteKey: string): string 
 
 export function utcMinuteKey(date = new Date()): string {
   return date.toISOString().slice(0, 16);
+}
+
+/**
+ * Publish order gate: only the earliest unpublished episode may go live.
+ * If media for episode 3 finishes before episode 2, episode 3 must wait.
+ */
+export function isEpisodeNextInPublishOrder(input: {
+  candidateEpisodeNumber: number;
+  /** Lowest unpublished, non-skipped episode number in the series (required head). */
+  earliestUnpublishedEpisodeNumber: number | null;
+}): boolean {
+  if (input.earliestUnpublishedEpisodeNumber == null) return false;
+  return input.candidateEpisodeNumber === input.earliestUnpublishedEpisodeNumber;
 }
 
 /** Whether replacement planning should start for this lane progress. */

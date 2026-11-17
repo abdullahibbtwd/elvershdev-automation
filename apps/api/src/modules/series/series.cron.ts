@@ -117,7 +117,13 @@ export class SeriesCronService {
         if (!laneEnabled) continue;
         if (!this.lanes.canLaneAcceptWork(lane)) continue;
 
-        const nextPublishAt = computeNextPublishAt(now, lane.timezone, lane.publishTime);
+        // Never pull a reserved future nextPublishAt backward — that caused same-day
+        // multi-episode publishes when produce-ahead finished early.
+        const computedPublishAt = computeNextPublishAt(now, lane.timezone, lane.publishTime);
+        const nextPublishAt =
+          lane.nextPublishAt && lane.nextPublishAt.getTime() > now.getTime()
+            ? lane.nextPublishAt
+            : computedPublishAt;
         const nextProductionAt = computeNextProductionAt(
           now,
           lane.timezone,
@@ -126,16 +132,19 @@ export class SeriesCronService {
           lane.preferredProductionTime,
         );
 
-        const anchorsStale =
-          !lane.nextPublishAt ||
-          Math.abs(lane.nextPublishAt.getTime() - nextPublishAt.getTime()) > 60_000 ||
+        const publishAnchorNeedsRefresh =
+          !lane.nextPublishAt || lane.nextPublishAt.getTime() <= now.getTime();
+        const productionAnchorStale =
           !lane.nextProductionAt ||
           Math.abs(lane.nextProductionAt.getTime() - nextProductionAt.getTime()) > 60_000;
 
-        if (anchorsStale) {
+        if (publishAnchorNeedsRefresh || productionAnchorStale) {
           await this.prisma.seriesLane.update({
             where: { id: lane.id },
-            data: { nextPublishAt, nextProductionAt },
+            data: {
+              ...(publishAnchorNeedsRefresh ? { nextPublishAt } : {}),
+              ...(productionAnchorStale ? { nextProductionAt } : {}),
+            },
           });
         }
 

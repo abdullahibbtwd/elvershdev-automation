@@ -17,6 +17,8 @@ import {
   buildSeriesEpisodePostTitle,
   buildViralHashtags,
   computeNextPublishAt,
+  isEpisodeNextInPublishOrder,
+  resolveLanePublishSlot,
   seriesPublishJobId,
   seriesScheduleIdempotencyKey,
   type PublishingCapabilities,
@@ -66,8 +68,8 @@ export class SeriesPublishSchedulerService {
 
   /**
    * Ensure a unique SeriesSchedule exists for the next publishable episode on a lane.
-   * Prefers RENDERED episodes with a completed render; may pre-schedule APPROVED
-   * episodes that will wait for render before live social handoff.
+   * One open schedule per lane; one publish slot per local day (never stack 10 for today).
+   * Prefers RENDERED episodes; may pre-schedule APPROVED episodes that wait for render.
    */
   async ensureNextSchedule(userId: string, laneId: string) {
     const config = await this.configService.getOrCreate(userId);
@@ -83,36 +85,17 @@ export class SeriesPublishSchedulerService {
       return { created: false, reason: 'lane_not_active' as const };
     }
 
-    const episode =
-      (await this.prisma.seriesEpisode.findFirst({
-        where: {
-          seriesId: lane.activeSeriesId,
-          publishedAt: null,
-          approvalStatus: SeriesEpisodeApprovalStatus.APPROVED,
-          status: SeriesEpisodeStatus.RENDERED,
-          videoRenderId: { not: null },
-          schedules: { none: {} },
-        },
-        orderBy: { episodeNumber: 'asc' },
-      })) ??
-      (await this.prisma.seriesEpisode.findFirst({
-        where: {
-          seriesId: lane.activeSeriesId,
-          publishedAt: null,
-          approvalStatus: SeriesEpisodeApprovalStatus.APPROVED,
-          status: {
-            in: [
-              SeriesEpisodeStatus.APPROVED,
-              SeriesEpisodeStatus.RENDERED,
-              SeriesEpisodeStatus.SCHEDULED,
-            ],
-          },
-          schedules: { none: {} },
-        },
-        orderBy: { episodeNumber: 'asc' },
-      }));
+    // Strict sequence: always the earliest unpublished episode — never jump to 3 if 2 is unfinished.
+    const nextInOrder = await this.prisma.seriesEpisode.findFirst({
+      where: {
+        seriesId: lane.activeSeriesId,
+        publishedAt: null,
+        status: { not: SeriesEpisodeStatus.SKIPPED },
+      },
+      orderBy: { episodeNumber: 'asc' },
+    });
 
-    if (!episode) {
+    if (!nextInOrder) {
       await this.notifications.notify({
         userId,
         type: SERIES_NOTIFICATION_TYPES.NO_READY_EPISODE,
@@ -124,33 +107,165 @@ export class SeriesPublishSchedulerService {
       return { created: false, reason: 'no_ready_episode' as const };
     }
 
-    const scheduledAt =
-      lane.nextPublishAt ??
-      computeNextPublishAt(new Date(), lane.timezone, lane.publishTime);
+    // Defer any out-of-order in-flight schedules (e.g. ep3 finished media before ep2).
+    const outOfOrderPending = await this.prisma.seriesSchedule.findMany({
+      where: {
+        laneId,
+        episodeId: { not: nextInOrder.id },
+        state: {
+          in: [
+            SeriesScheduleState.PENDING,
+            SeriesScheduleState.SCHEDULED,
+            SeriesScheduleState.QUEUED,
+          ],
+        },
+      },
+      take: 20,
+    });
+    if (outOfOrderPending.length) {
+      const holdUntil = computeNextPublishAt(
+        new Date(),
+        lane.timezone,
+        lane.publishTime,
+      );
+      for (const row of outOfOrderPending) {
+        await this.prisma.seriesSchedule.update({
+          where: { id: row.id },
+          data: {
+            state: SeriesScheduleState.SCHEDULED,
+            scheduledAt: holdUntil,
+            lastError: `Held — publish episode ${nextInOrder.episodeNumber} first`,
+          },
+        });
+      }
+      this.logger.warn(
+        `Deferred ${outOfOrderPending.length} out-of-order schedule(s) on lane=${laneId}; head episode=${nextInOrder.episodeNumber}`,
+      );
+    }
+
+    const pendingForHead = await this.prisma.seriesSchedule.findFirst({
+      where: {
+        laneId,
+        episodeId: nextInOrder.id,
+        state: {
+          in: [
+            SeriesScheduleState.PENDING,
+            SeriesScheduleState.SCHEDULED,
+            SeriesScheduleState.QUEUED,
+            SeriesScheduleState.PUBLISHING,
+          ],
+        },
+      },
+    });
+    if (pendingForHead) {
+      return {
+        created: false,
+        schedule: pendingForHead,
+        reason: 'pending_schedule_exists' as const,
+      };
+    }
+
+    const alreadyScheduled = await this.prisma.seriesSchedule.findFirst({
+      where: {
+        laneId,
+        episodeId: nextInOrder.id,
+        state: {
+          notIn: [SeriesScheduleState.CANCELLED, SeriesScheduleState.SKIPPED],
+        },
+      },
+    });
+    if (alreadyScheduled) {
+      return {
+        created: false,
+        schedule: alreadyScheduled,
+        reason: 'episode_already_scheduled' as const,
+      };
+    }
+
+    const approved =
+      nextInOrder.approvalStatus === SeriesEpisodeApprovalStatus.APPROVED;
+    const renderedReady =
+      nextInOrder.status === SeriesEpisodeStatus.RENDERED &&
+      Boolean(nextInOrder.videoRenderId);
+    const preScheduleReady =
+      approved &&
+      (nextInOrder.status === SeriesEpisodeStatus.APPROVED ||
+        nextInOrder.status === SeriesEpisodeStatus.RENDERED ||
+        nextInOrder.status === SeriesEpisodeStatus.SCHEDULED);
+
+    if (!renderedReady && !preScheduleReady) {
+      this.logger.debug(
+        `Lane ${laneId} waiting for episode ${nextInOrder.episodeNumber} before later ready episodes can publish`,
+      );
+      return {
+        created: false,
+        reason: 'waiting_for_earlier_episode' as const,
+        episodeNumber: nextInOrder.episodeNumber,
+        episodeId: nextInOrder.id,
+      };
+    }
+
+    const episode = nextInOrder;
+
+    const latestScheduled = await this.prisma.seriesSchedule.findFirst({
+      where: {
+        laneId,
+        state: {
+          notIn: [SeriesScheduleState.CANCELLED, SeriesScheduleState.SKIPPED],
+        },
+      },
+      orderBy: { scheduledAt: 'desc' },
+      select: { scheduledAt: true },
+    });
+
+    const now = new Date();
+    const scheduledAt = resolveLanePublishSlot({
+      now,
+      timeZone: lane.timezone,
+      publishTime: lane.publishTime,
+      laneNextPublishAt: lane.nextPublishAt,
+      latestScheduledAt: latestScheduled?.scheduledAt ?? null,
+    });
+    // Reserve the following day immediately so concurrent ensureNextSchedule calls
+    // cannot reuse today's slot while this publish is still in flight.
+    const reservedNextPublishAt = computeNextPublishAt(
+      scheduledAt,
+      lane.timezone,
+      lane.publishTime,
+    );
     const idempotencyKey = seriesScheduleIdempotencyKey(laneId, episode.id);
 
     try {
-      const schedule = await this.prisma.seriesSchedule.create({
-        data: {
-          userId,
-          laneId,
-          episodeId: episode.id,
-          scheduledAt,
-          state: SeriesScheduleState.SCHEDULED,
-          idempotencyKey,
-          publicationDestination: {
-            channelIds: config.activeChannelIds,
-            channelPublishingEnabled: config.channelPublishingEnabled,
-          } as Prisma.InputJsonValue,
-        },
-      });
+      const schedule = await this.prisma.$transaction(async (tx) => {
+        const created = await tx.seriesSchedule.create({
+          data: {
+            userId,
+            laneId,
+            episodeId: episode.id,
+            scheduledAt,
+            state: SeriesScheduleState.SCHEDULED,
+            idempotencyKey,
+            publicationDestination: {
+              channelIds: config.activeChannelIds,
+              channelPublishingEnabled: config.channelPublishingEnabled,
+            } as Prisma.InputJsonValue,
+          },
+        });
 
-      await this.prisma.seriesEpisode.update({
-        where: { id: episode.id },
-        data: {
-          status: SeriesEpisodeStatus.SCHEDULED,
-          scheduledAt,
-        },
+        await tx.seriesEpisode.update({
+          where: { id: episode.id },
+          data: {
+            status: SeriesEpisodeStatus.SCHEDULED,
+            scheduledAt,
+          },
+        });
+
+        await tx.seriesLane.update({
+          where: { id: laneId },
+          data: { nextPublishAt: reservedNextPublishAt },
+        });
+
+        return created;
       });
 
       await this.notifications.notify({
@@ -247,6 +362,7 @@ export class SeriesPublishSchedulerService {
             story: true,
             series: {
               select: {
+                id: true,
                 title: true,
                 genre: true,
                 slug: true,
@@ -258,6 +374,49 @@ export class SeriesPublishSchedulerService {
         lane: true,
       },
     });
+
+    // Hard order gate at publish time: never go live with ep3 while ep2 is still unpublished.
+    const earliestUnpublished = await this.prisma.seriesEpisode.findFirst({
+      where: {
+        seriesId: schedule.episode.series.id,
+        publishedAt: null,
+        status: { not: SeriesEpisodeStatus.SKIPPED },
+      },
+      orderBy: { episodeNumber: 'asc' },
+      select: { id: true, episodeNumber: true },
+    });
+    if (
+      !isEpisodeNextInPublishOrder({
+        candidateEpisodeNumber: schedule.episode.episodeNumber,
+        earliestUnpublishedEpisodeNumber: earliestUnpublished?.episodeNumber ?? null,
+      })
+    ) {
+      const nextAt = computeNextPublishAt(
+        new Date(),
+        schedule.lane.timezone,
+        schedule.lane.publishTime,
+      );
+      await this.prisma.seriesSchedule.update({
+        where: { id: scheduleId },
+        data: {
+          state: SeriesScheduleState.SCHEDULED,
+          scheduledAt: nextAt,
+          lastError: `Holding publish — waiting for episode ${earliestUnpublished?.episodeNumber ?? '?'} first`,
+        },
+      });
+      await this.prisma.seriesEpisode.update({
+        where: { id: schedule.episodeId },
+        data: { scheduledAt: nextAt, status: SeriesEpisodeStatus.SCHEDULED },
+      });
+      this.logger.warn(
+        `Blocked out-of-order publish schedule=${scheduleId} ep=${schedule.episode.episodeNumber}; head=${earliestUnpublished?.episodeNumber}`,
+      );
+      return {
+        ok: false,
+        reason: 'waiting_for_earlier_episode' as const,
+        episodeNumber: earliestUnpublished?.episodeNumber,
+      };
+    }
 
     const config = await this.configService.getOrCreate(schedule.userId);
     if (!config.automaticPublishing || !this.configService.canScheduleNewWork(config)) {

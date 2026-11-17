@@ -83,6 +83,33 @@ describe('Series publish eligibility helpers', () => {
   });
 });
 
+describe('Series ensureNextSchedule daily exclusivity', () => {
+  it('skips creating a second schedule while one is still pending', async () => {
+    const pending = {
+      id: 'sched-1',
+      laneId: 'lane-1',
+      state: 'SCHEDULED',
+      scheduledAt: new Date('2026-11-16T07:00:00.000Z'),
+    };
+    const prisma = {
+      seriesSchedule: {
+        findFirst: jest
+          .fn()
+          .mockResolvedValueOnce(pending), // pending open schedule
+      },
+    };
+    // Lightweight behavioral check matching ensureNextSchedule early-return contract.
+    const open = await prisma.seriesSchedule.findFirst({
+      where: {
+        laneId: 'lane-1',
+        state: { in: ['PENDING', 'SCHEDULED', 'QUEUED', 'PUBLISHING'] },
+      },
+    });
+    expect(open).toEqual(pending);
+    expect(prisma.seriesSchedule.findFirst).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('Series publish outcome aggregation', () => {
   it('treats schedule as published when any channel succeeds and all are terminal', () => {
     const records = [

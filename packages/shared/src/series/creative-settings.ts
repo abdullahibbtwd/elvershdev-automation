@@ -114,10 +114,10 @@ export function creativeSettingsToBriefFields(settings: SeriesCreativeSettings):
     ? `Concept: ${settings.storyConcept}`
     : null;
 
+  // Language / dialogue rules are appended last so they win over long lane story concepts.
   const instructionParts = [
     themeOverflow,
     conceptPart && themeJoined.length > 200 ? conceptPart : null,
-    settings.dialogueStyle ? `Dialogue style: ${settings.dialogueStyle}` : null,
     settings.narrativeTone ? `Narrative tone: ${settings.narrativeTone}` : null,
     settings.storytellingRules.length
       ? `Storytelling rules: ${settings.storytellingRules.join('; ')}`
@@ -138,11 +138,15 @@ export function creativeSettingsToBriefFields(settings: SeriesCreativeSettings):
     settings.characterConsistencyRequired
       ? 'Character visual consistency is mandatory across all episodes.'
       : null,
+    settings.aspectRatio ? `Aspect ratio: ${settings.aspectRatio}` : null,
+    settings.customCreativeInstructions || null,
     settings.narrationPreferences
       ? `Narration preferences: ${settings.narrationPreferences}`
       : null,
-    settings.aspectRatio ? `Aspect ratio: ${settings.aspectRatio}` : null,
-    settings.customCreativeInstructions || null,
+    settings.dialogueStyle ? `Dialogue style: ${settings.dialogueStyle}` : null,
+    settings.dialogueStyle || settings.customCreativeInstructions
+      ? 'Language priority: keep dialogue and narration in clear everyday spoken English even when tone/concept is dramatic or cinematic.'
+      : null,
   ].filter(Boolean) as string[];
 
   const themePrimary = [

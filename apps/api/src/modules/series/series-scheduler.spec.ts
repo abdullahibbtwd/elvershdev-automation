@@ -1,6 +1,8 @@
 import {
   computeNextPublishAt,
+  isEpisodeNextInPublishOrder,
   isLanePublishDue,
+  resolveLanePublishSlot,
   seriesPublishJobId,
   seriesReplacementIdempotencyKey,
   seriesScheduleIdempotencyKey,
@@ -21,6 +23,48 @@ describe('Series Phase E/G scheduler rules', () => {
     const now = new Date('2026-11-16T19:00:00.000Z');
     const next = computeNextPublishAt(now, 'UTC', '19:00');
     expect(next.getTime()).toBeGreaterThan(now.getTime());
+  });
+
+  it('keeps publish order by episode number even if later media finishes first', () => {
+    expect(
+      isEpisodeNextInPublishOrder({
+        candidateEpisodeNumber: 3,
+        earliestUnpublishedEpisodeNumber: 2,
+      }),
+    ).toBe(false);
+    expect(
+      isEpisodeNextInPublishOrder({
+        candidateEpisodeNumber: 2,
+        earliestUnpublishedEpisodeNumber: 2,
+      }),
+    ).toBe(true);
+    expect(
+      isEpisodeNextInPublishOrder({
+        candidateEpisodeNumber: 1,
+        earliestUnpublishedEpisodeNumber: null,
+      }),
+    ).toBe(false);
+  });
+
+  it('never stacks multiple episodes onto the same local publish day', () => {
+    const now = new Date('2026-11-16T07:05:00.000Z'); // 08:05 Lagos
+    const todaySlot = new Date('2026-11-16T07:00:00.000Z'); // 08:00 Lagos
+    const day2 = resolveLanePublishSlot({
+      now,
+      timeZone: 'Africa/Lagos',
+      publishTime: '08:00',
+      laneNextPublishAt: todaySlot,
+      latestScheduledAt: todaySlot,
+    });
+    expect(day2.toISOString()).toBe('2026-11-17T07:00:00.000Z');
+    const day3 = resolveLanePublishSlot({
+      now,
+      timeZone: 'Africa/Lagos',
+      publishTime: '08:00',
+      laneNextPublishAt: todaySlot,
+      latestScheduledAt: day2,
+    });
+    expect(day3.toISOString()).toBe('2026-11-18T07:00:00.000Z');
   });
 
   it('triggers replacement at configured episode threshold only', () => {

@@ -6,6 +6,8 @@ import {
   isLaneProductionEligible,
   isLanePublishDue,
   isSeriesStageAutoEnabled,
+  isEpisodeNextInPublishOrder,
+  resolveLanePublishSlot,
   seriesMaintenanceJobId,
   seriesPublishJobId,
   seriesReplacementIdempotencyKey,
@@ -28,6 +30,55 @@ describe('series scheduler helpers', () => {
     const next = computeNextPublishAt(now, 'UTC', '19:00');
     expect(next.getTime()).toBeGreaterThan(now.getTime());
     expect(next.toISOString()).toContain('T19:00:00');
+  });
+
+  it('blocks later episodes from publishing before earlier unpublished ones', () => {
+    expect(
+      isEpisodeNextInPublishOrder({
+        candidateEpisodeNumber: 3,
+        earliestUnpublishedEpisodeNumber: 2,
+      }),
+    ).toBe(false);
+    expect(
+      isEpisodeNextInPublishOrder({
+        candidateEpisodeNumber: 2,
+        earliestUnpublishedEpisodeNumber: 2,
+      }),
+    ).toBe(true);
+  });
+
+  it('resolveLanePublishSlot never reuses the same local day after a prior schedule', () => {
+    // After publishing/scheduling today's 08:00 Lagos slot, next episode must be tomorrow.
+    const now = new Date('2026-11-16T07:05:00.000Z'); // 08:05 Lagos
+    const todaySlot = new Date('2026-11-16T07:00:00.000Z'); // 08:00 Lagos
+    const tomorrow = resolveLanePublishSlot({
+      now,
+      timeZone: 'Africa/Lagos',
+      publishTime: '08:00',
+      laneNextPublishAt: computeNextPublishAt(todaySlot, 'Africa/Lagos', '08:00'),
+      latestScheduledAt: todaySlot,
+    });
+    expect(tomorrow.toISOString()).toBe('2026-11-17T07:00:00.000Z');
+
+    // Simulate stacking attempts with the same stale lane.nextPublishAt (old bug).
+    const staleToday = todaySlot;
+    const second = resolveLanePublishSlot({
+      now,
+      timeZone: 'Africa/Lagos',
+      publishTime: '08:00',
+      laneNextPublishAt: staleToday,
+      latestScheduledAt: todaySlot,
+    });
+    expect(second.toISOString()).toBe('2026-11-17T07:00:00.000Z');
+
+    const third = resolveLanePublishSlot({
+      now,
+      timeZone: 'Africa/Lagos',
+      publishTime: '08:00',
+      laneNextPublishAt: staleToday,
+      latestScheduledAt: second,
+    });
+    expect(third.toISOString()).toBe('2026-11-18T07:00:00.000Z');
   });
 
   it('computes production clock from publish minus lead time', () => {
