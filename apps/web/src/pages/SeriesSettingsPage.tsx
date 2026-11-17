@@ -549,7 +549,12 @@ export function SeriesSettingsPage() {
               onChange={(e) =>
                 setForm((prev) => ({ ...prev, qualityAcceptanceThreshold: e.target.value }))
               }
+              placeholder="0.6"
             />
+            <p className="mt-1 text-xs text-muted-foreground">
+              Episode passes when score ≥ this value (0–1). Soft checks like duration can fail;
+              missing render/output still always fails.
+            </p>
           </Field>
           <Field label="Default production lead time (minutes)">
             <Input
@@ -702,6 +707,7 @@ export function SeriesSettingsPage() {
               onChange={(e) =>
                 setCreative((prev) => ({ ...prev, dialogueStyle: e.target.value }))
               }
+              placeholder="Simple everyday spoken English — short sentences, no fancy words"
             />
           </Field>
           <Field label="Cliffhanger intensity">
@@ -744,6 +750,7 @@ export function SeriesSettingsPage() {
                   customCreativeInstructions: e.target.value,
                 }))
               }
+              placeholder="Avoid purple prose. Write like a modern Netflix drama, easy to understand."
             />
           </Field>
         </div>

@@ -32,6 +32,7 @@ export function buildMoviePremisePrompt(brief: MovieArchitectBrief): string {
     `Target episode duration seconds: ${brief.targetEpisodeDurationSeconds}`,
     customMode ? `USER MOVIE IDEA (expand faithfully):\n${brief.customPremise}` : '',
     brief.additionalInstructions ? `Additional creative preferences: ${brief.additionalInstructions}` : '',
+    'Writing style: clear modern English for social video. Avoid purple prose and overly literary wording unless the creative preferences explicitly request it.',
     '',
     'Required keys: title, logline, synopsis, genre, subgenres, targetAudience, setting, worldRules, mainConflict, visualStyle.',
   ]

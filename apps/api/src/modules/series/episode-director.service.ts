@@ -13,6 +13,7 @@ import {
   QUEUE_NAMES,
   SERIES_DEFAULTS,
   SERIES_NOTIFICATION_TYPES,
+  buildCreativeLanguageStyleNotes,
   buildEpisodeScriptPrompt,
   countSpokenWords,
   createMockEpisodeScript,
@@ -22,6 +23,7 @@ import {
   estimateGeminiCostUsd,
   getGeminiPricingFromEnv,
   normalizeEpisodeScriptPlanInput,
+  parseSeriesCreativeSettings,
   type EpisodeScriptPlan,
   type SeriesEpisodePlanningPayload,
 } from '@ai-video/shared';
@@ -135,6 +137,8 @@ export class EpisodeDirectorService {
         episode.episodeNumber,
       );
       const meta = (episode.metadata ?? {}) as Record<string, unknown>;
+      const config = await this.configService.getOrCreate(userId);
+      const languageStyleNotes = this.buildLanguageStyleNotes(series, config);
 
       const planInput = {
         seriesTitle: series.title,
@@ -154,6 +158,7 @@ export class EpisodeDirectorService {
         userId,
         seriesId,
         episodeId,
+        languageStyleNotes,
       };
 
       let plan = await this.generateScriptPlan(planInput);
@@ -204,7 +209,6 @@ export class EpisodeDirectorService {
         });
       }
 
-      const config = await this.configService.getOrCreate(userId);
       const autoApprove = !effectiveEpisodeApprovalRequired(config);
 
       const saved = await this.prisma.$transaction(async (tx) => {
@@ -401,6 +405,29 @@ export class EpisodeDirectorService {
     });
   }
 
+  private buildLanguageStyleNotes(
+    series: {
+      metadata?: unknown;
+      language?: string | null;
+      tone?: string | null;
+    },
+    config: { creativeSettings?: unknown },
+  ): string | undefined {
+    const seriesMeta = (series.metadata ?? {}) as Record<string, unknown>;
+    const snapshot = parseSeriesCreativeSettings(
+      seriesMeta.creativeSettingsSnapshot ?? config.creativeSettings ?? {},
+    );
+    const fromCreative = buildCreativeLanguageStyleNotes(snapshot);
+    const extras = [
+      series.language ? `Series language: ${series.language}` : null,
+      series.tone ? `Series tone: ${series.tone}` : null,
+    ]
+      .filter(Boolean)
+      .join('\n');
+    const combined = [fromCreative, extras].filter(Boolean).join('\n').trim();
+    return combined || undefined;
+  }
+
   private async generateScriptPlan(input: {
     seriesTitle: string;
     plannedEpisodeCount: number;
@@ -418,6 +445,7 @@ export class EpisodeDirectorService {
     seriesId: string;
     episodeId: string;
     revisionNotes?: string;
+    languageStyleNotes?: string;
   }): Promise<EpisodeScriptPlan> {
     const useMock = input.useMockAi === true || this.gemini.shouldUseMock();
     if (useMock) {
@@ -464,6 +492,7 @@ export class EpisodeDirectorService {
       relationshipsDigest: input.context.relationshipsDigest,
       visualRefsDigest: input.context.visualRefsDigest,
       revisionNotes: input.revisionNotes,
+      languageStyleNotes: input.languageStyleNotes,
     });
 
     const result = await this.gemini.generateJson(

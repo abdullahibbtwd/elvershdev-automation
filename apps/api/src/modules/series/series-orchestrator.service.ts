@@ -804,7 +804,10 @@ export class SeriesOrchestratorService {
         data: {
           status: SeriesEpisodeStatus.FAILED,
           productionState: SeriesEpisodeProductionState.FAILED,
-          lastError: `Quality check failed (score=${quality.score.toFixed(2)})`,
+          lastError: `Quality check failed (score=${quality.score.toFixed(2)}, threshold=${quality.threshold.toFixed(2)}; failed: ${quality.checks
+            .filter((c) => !c.passed)
+            .map((c) => c.id)
+            .join(', ') || 'none'})`,
           blockedReason: quality.blockedReason ?? 'quality_check_failed',
         },
       });

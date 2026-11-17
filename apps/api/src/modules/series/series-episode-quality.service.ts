@@ -1,28 +1,41 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Prisma, VideoRenderStatus } from '@prisma/client';
+import { SERIES_DEFAULTS } from '@ai-video/shared';
 import { PrismaService } from '../../prisma/prisma.service';
+import { SeriesConfigService } from './series-config.service';
 
 export type SeriesEpisodeQualityResult = {
   passed: boolean;
   score: number;
-  checks: Array<{ id: string; passed: boolean; detail: string }>;
+  threshold: number;
+  checks: Array<{ id: string; passed: boolean; hard?: boolean; detail: string }>;
   blockedReason?: string;
 };
 
 /**
  * Automated post-render quality gate for Series Studio.
- * Failed checks must never mark an episode ready to publish.
+ * Soft checks contribute to score; hard checks (render + asset) always required.
+ * Pass when hard checks succeed AND score >= Series Settings qualityAcceptanceThreshold.
  */
 @Injectable()
 export class SeriesEpisodeQualityService {
   private readonly logger = new Logger(SeriesEpisodeQualityService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly configService: SeriesConfigService,
+  ) {}
 
   async evaluateRenderedEpisode(
     userId: string,
     episodeId: string,
   ): Promise<SeriesEpisodeQualityResult> {
+    const config = await this.configService.getOrCreate(userId);
+    const threshold =
+      typeof config.qualityAcceptanceThreshold === 'number'
+        ? config.qualityAcceptanceThreshold
+        : SERIES_DEFAULTS.qualityAcceptanceThreshold;
+
     const episode = await this.prisma.seriesEpisode.findFirst({
       where: { id: episodeId, series: { userId } },
       include: {
@@ -39,7 +52,8 @@ export class SeriesEpisodeQualityService {
       return {
         passed: false,
         score: 0,
-        checks: [{ id: 'episode_exists', passed: false, detail: 'Episode not found' }],
+        threshold,
+        checks: [{ id: 'episode_exists', passed: false, hard: true, detail: 'Episode not found' }],
         blockedReason: 'quality_episode_missing',
       };
     }
@@ -50,6 +64,7 @@ export class SeriesEpisodeQualityService {
     checks.push({
       id: 'script_present',
       passed: hasScript,
+      hard: true,
       detail: hasScript ? 'Script present' : 'Script missing',
     });
 
@@ -57,6 +72,7 @@ export class SeriesEpisodeQualityService {
     checks.push({
       id: 'scenes_present',
       passed: hasScenes > 0,
+      hard: true,
       detail: hasScenes > 0 ? `${hasScenes} scenes` : 'No scenes',
     });
 
@@ -68,6 +84,7 @@ export class SeriesEpisodeQualityService {
       checks.push({
         id: 'render_row',
         passed: false,
+        hard: true,
         detail: 'No videoRenderId on episode',
       });
     } else {
@@ -79,13 +96,13 @@ export class SeriesEpisodeQualityService {
       checks.push({
         id: 'render_completed',
         passed: renderOk,
-        detail: render
-          ? `Render status=${render.status}`
-          : 'Render row missing',
+        hard: true,
+        detail: render ? `Render status=${render.status}` : 'Render row missing',
       });
       checks.push({
         id: 'output_asset',
         passed: assetOk,
+        hard: true,
         detail: assetOk ? 'Output media asset present' : 'Missing output media asset',
       });
 
@@ -96,17 +113,19 @@ export class SeriesEpisodeQualityService {
           : episode.actualDurationSeconds;
       if (target && actual) {
         const delta = Math.abs(actual - target);
-        // Allow generous tolerance for short-form 40–60s content.
+        // Soft check — can fail without hard-failing if score still meets threshold.
         durationOk = delta <= Math.max(20, target * 0.5);
         checks.push({
           id: 'duration_tolerance',
           passed: durationOk,
+          hard: false,
           detail: `actual=${actual}s target=${target}s delta=${delta}s`,
         });
       } else {
         checks.push({
           id: 'duration_tolerance',
           passed: true,
+          hard: false,
           detail: 'Duration not available — skipped',
         });
       }
@@ -114,11 +133,13 @@ export class SeriesEpisodeQualityService {
 
     const passedCount = checks.filter((c) => c.passed).length;
     const score = checks.length ? passedCount / checks.length : 0;
-    const passed = checks.every((c) => c.passed);
+    const hardFailed = checks.some((c) => c.hard && !c.passed);
+    const passed = !hardFailed && score >= threshold;
 
     const result: SeriesEpisodeQualityResult = {
       passed,
       score,
+      threshold,
       checks,
       blockedReason: passed ? undefined : 'quality_check_failed',
     };
@@ -138,8 +159,9 @@ export class SeriesEpisodeQualityService {
     });
 
     if (!passed) {
+      const failedIds = checks.filter((c) => !c.passed).map((c) => c.id).join(',');
       this.logger.warn(
-        `Episode quality failed episode=${episodeId} score=${score.toFixed(2)}`,
+        `Episode quality failed episode=${episodeId} score=${score.toFixed(2)} threshold=${threshold} hardFailed=${hardFailed} failed=[${failedIds}]`,
       );
     }
 

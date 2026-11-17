@@ -169,3 +169,23 @@ export function creativeSettingsToBriefFields(settings: SeriesCreativeSettings):
       : undefined,
   };
 }
+
+/** Compact language/dialogue notes for episode script generation. */
+export function buildCreativeLanguageStyleNotes(
+  settings: SeriesCreativeSettings,
+): string {
+  return [
+    settings.language ? `Language: ${settings.language}` : null,
+    settings.tone ? `Tone: ${settings.tone}` : null,
+    settings.narrativeTone ? `Narrative tone: ${settings.narrativeTone}` : null,
+    settings.dialogueStyle ? `Dialogue style: ${settings.dialogueStyle}` : null,
+    settings.narrationPreferences
+      ? `Narration preferences: ${settings.narrationPreferences}`
+      : null,
+    settings.customCreativeInstructions
+      ? `Custom instructions: ${settings.customCreativeInstructions}`
+      : null,
+  ]
+    .filter(Boolean)
+    .join('\n');
+}

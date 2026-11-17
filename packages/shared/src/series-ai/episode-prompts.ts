@@ -21,6 +21,8 @@ export function buildEpisodeScriptPrompt(input: {
   visualRefsDigest: string;
   /** Prior continuity failures to fix on regenerate/retry. */
   revisionNotes?: string;
+  /** Tone / dialogue / narration style from Series creative settings. */
+  languageStyleNotes?: string;
 }): string {
   const wordMin = Math.round(
     (SERIES_DEFAULTS.spokenWordsPerSixtySecondsMin * input.targetDurationSeconds) / 60,
@@ -76,6 +78,13 @@ export function buildEpisodeScriptPrompt(input: {
     '',
     'Current relationships:',
     input.relationshipsDigest || 'Use character relationship canon.',
+    '',
+    'Language & dialogue (mandatory unless style notes say otherwise):',
+    '- Use clear, natural spoken English that real people would say aloud.',
+    '- Prefer short sentences. Avoid purple prose, archaic words, and over-literary narration.',
+    '- Do NOT sound like a Victorian novel or academic essay. Sound like a modern drama series.',
+    '- Keep tension and emotion, but stay easy to understand for social video viewers.',
+    input.languageStyleNotes ? `Creative language settings:\n${input.languageStyleNotes}` : '',
     '',
     'Episode craft:',
     '- Compelling opening hook',

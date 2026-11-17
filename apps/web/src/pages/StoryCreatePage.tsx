@@ -151,7 +151,7 @@ export function StoryCreatePage() {
           <Textarea
             value={additionalInstructions}
             onChange={(e) => setAdditionalInstructions(e.target.value)}
-            placeholder="Keep it under 120 words, end with a call to action..."
+            placeholder="Use normal everyday English. Short sentences. No fancy or literary words."
           />
         </div>
 
