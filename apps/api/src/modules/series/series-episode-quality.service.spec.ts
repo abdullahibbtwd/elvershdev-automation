@@ -9,6 +9,15 @@ function makeConfigService(threshold = 0.7) {
   };
 }
 
+function makeDialogueProduction() {
+  return {
+    evaluateDialogueQuality: jest.fn(async () => ({
+      passed: true,
+      checks: [{ id: 'dialogue_mode', passed: true, detail: 'not dialogue-driven' }],
+    })),
+  };
+}
+
 describe('SeriesEpisodeQualityService', () => {
   it('fails when render output asset is missing (hard check)', async () => {
     const prisma = {
@@ -40,6 +49,7 @@ describe('SeriesEpisodeQualityService', () => {
     const service = new SeriesEpisodeQualityService(
       prisma as never,
       makeConfigService(0.6) as never,
+      makeDialogueProduction() as never,
     );
     const result = await service.evaluateRenderedEpisode('user-1', 'ep-1');
     expect(result.passed).toBe(false);
@@ -78,6 +88,7 @@ describe('SeriesEpisodeQualityService', () => {
     const service = new SeriesEpisodeQualityService(
       prisma as never,
       makeConfigService(0.7) as never,
+      makeDialogueProduction() as never,
     );
     const result = await service.evaluateRenderedEpisode('user-1', 'ep-1');
     expect(result.passed).toBe(true);
@@ -114,6 +125,7 @@ describe('SeriesEpisodeQualityService', () => {
     const service = new SeriesEpisodeQualityService(
       prisma as never,
       makeConfigService(0.6) as never,
+      makeDialogueProduction() as never,
     );
     const result = await service.evaluateRenderedEpisode('user-1', 'ep-1');
     expect(result.score).toBe(0.8);
@@ -152,6 +164,7 @@ describe('SeriesEpisodeQualityService', () => {
     const service = new SeriesEpisodeQualityService(
       prisma as never,
       makeConfigService(0.85) as never,
+      makeDialogueProduction() as never,
     );
     const result = await service.evaluateRenderedEpisode('user-1', 'ep-1');
     expect(result.score).toBe(0.8);

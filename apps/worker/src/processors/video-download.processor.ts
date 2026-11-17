@@ -229,6 +229,8 @@ export function createVideoDownloadProcessor(logger: Logger): Processor {
       const providerIdForUsage = resolveVideoProviderId(
         data.provider || motion.provider || process.env.VIDEO_GENERATION_PROVIDER,
       );
+      // Cost is recorded at image_to_video_submit. Completion is a lifecycle marker only
+      // (avoids double-counting the same Hailuo/Kling clip in ProviderUsage sums).
       await prisma.providerUsage.create({
         data: {
           userId: motion.userId,
@@ -237,10 +239,7 @@ export function createVideoDownloadProcessor(logger: Logger): Processor {
           provider: providerIdForUsage,
           model: motion.providerModel || providerIdForUsage,
           requestType: 'image_to_video_complete',
-          estimatedCost:
-            status.actualCostUsd != null
-              ? new Prisma.Decimal(status.actualCostUsd)
-              : (motion.estimatedCost ?? new Prisma.Decimal(0)),
+          estimatedCost: new Prisma.Decimal(0),
           metadata: {
             motionGenerationId: motion.id,
             sceneId: motion.sceneId,
@@ -251,8 +250,9 @@ export function createVideoDownloadProcessor(logger: Logger): Processor {
             fileSize: retrieved.contentLength,
             actualCost: status.actualCostUsd ?? null,
             estimatedCost: motion.estimatedCost != null ? Number(motion.estimatedCost) : null,
-            costKind: status.actualCostUsd != null ? 'actual' : 'estimated',
-            estimated: status.actualCostUsd == null,
+            costKind: 'lifecycle',
+            billedAt: 'image_to_video_submit',
+            estimated: false,
           },
         },
       });

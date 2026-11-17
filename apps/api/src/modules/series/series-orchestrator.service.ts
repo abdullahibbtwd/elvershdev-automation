@@ -19,11 +19,14 @@ import {
 } from '@prisma/client';
 import {
   QUEUE_NAMES,
+  SERIES_DIALOGUE_PRODUCTION_STAGE_ORDER,
   SERIES_NOTIFICATION_TYPES,
   SERIES_PRODUCTION_STAGE_ORDER,
   bullMqJobId,
   isSeriesStageAutoEnabled,
+  nextSeriesDialogueProductionStage,
   nextSeriesProductionStage,
+  type SeriesDialogueProductionStageName,
   type SeriesEpisodeProductionPayload,
   type SeriesProductionStageName,
 } from '@ai-video/shared';
@@ -34,6 +37,7 @@ import { NarrationService } from '../narration/narration.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { RenderingService } from '../rendering/rendering.service';
 import { VisualsService } from '../visuals/visuals.service';
+import { DialogueProductionService } from './dialogue-production.service';
 import { SeriesConfigService } from './series-config.service';
 import { SeriesEpisodeQualityService } from './series-episode-quality.service';
 import { SeriesLifecycleHandoffService } from './series-lifecycle-handoff.service';
@@ -74,6 +78,7 @@ export class SeriesOrchestratorService {
     private readonly queueService: QueueService,
     private readonly handoff: SeriesLifecycleHandoffService,
     private readonly quality: SeriesEpisodeQualityService,
+    private readonly dialogueProduction: DialogueProductionService,
   ) {}
 
   async startProduction(
@@ -123,6 +128,14 @@ export class SeriesOrchestratorService {
     });
     const attemptNumber = (latestAttempt?.attemptNumber ?? 0) + 1;
 
+    const dialogueDriven = await this.dialogueProduction.isDialogueDrivenForEpisode(
+      userId,
+      seriesId,
+    );
+    const initialStage = dialogueDriven
+      ? SERIES_DIALOGUE_PRODUCTION_STAGE_ORDER[0]
+      : SERIES_PRODUCTION_STAGE_ORDER[0];
+
     const run = await this.prisma.seriesProductionRun.create({
       data: {
         userId,
@@ -130,12 +143,13 @@ export class SeriesOrchestratorService {
         episodeId,
         attemptNumber,
         status: SeriesProductionRunStatus.PENDING,
-        stage: SERIES_PRODUCTION_STAGE_ORDER[0],
+        stage: initialStage,
         metadata: {
           useMockAi: isMockAiEnabled(options?.useMockAi),
           force: options?.force === true,
           // Manual starts may run stages even when automatic stage switches are off.
           manualTrigger: options?.manualTrigger === true || options?.force === true,
+          dialogueDriven,
         } as Prisma.InputJsonValue,
       },
     });
@@ -187,7 +201,11 @@ export class SeriesOrchestratorService {
     }
 
     const useMockAi = isMockAiEnabled(payload.useMockAi);
-    const stage = (run.stage as SeriesProductionStageName) || 'MATERIALIZE';
+    const runMeta = (run.metadata as Record<string, unknown>) ?? {};
+    const dialogueDriven = runMeta.dialogueDriven === true;
+    const stage =
+      (run.stage as SeriesProductionStageName | SeriesDialogueProductionStageName) ||
+      'MATERIALIZE';
 
     try {
       await this.prisma.seriesProductionRun.update({
@@ -210,12 +228,35 @@ export class SeriesOrchestratorService {
         payload,
         run,
         episode.id,
-        stage,
+        stage as SeriesProductionStageName,
         config,
       );
       if (stageGate) return stageGate;
 
-      switch (stage) {
+      if (dialogueDriven) {
+        switch (stage as SeriesDialogueProductionStageName) {
+          case 'MATERIALIZE':
+            return this.ensureMaterialize(payload, run, useMockAi);
+          case 'VOICE_ASSIGNMENT':
+            return this.ensureDialogueVoiceAssignment(payload, run);
+          case 'VISUAL_INTELLIGENCE':
+            return this.ensureVisuals(payload, run, episode.storyId, useMockAi);
+          case 'DIALOGUE_AUDIO':
+            return this.ensureDialogueAudio(payload, run, useMockAi);
+          case 'LIP_SYNC':
+            return this.ensureLipSync(payload, run, useMockAi);
+          case 'AUDIO_MIX':
+            return this.ensureDialogueAudioMix(payload, run);
+          case 'RENDER':
+            return this.ensureRender(payload, run, episode, useMockAi);
+          case 'DONE':
+            return this.completeDone(run, episode.id);
+          default:
+            throw new Error(`Unknown dialogue production stage: ${stage}`);
+        }
+      }
+
+      switch (stage as SeriesProductionStageName) {
         case 'MATERIALIZE':
           return this.ensureMaterialize(payload, run, useMockAi);
         case 'VISUAL_INTELLIGENCE':
@@ -902,6 +943,22 @@ export class SeriesOrchestratorService {
         enabled: config.automaticNarration,
         setting: 'automaticNarration',
       },
+      VOICE_ASSIGNMENT: {
+        enabled: config.automaticNarration,
+        setting: 'automaticNarration',
+      },
+      DIALOGUE_AUDIO: {
+        enabled: config.automaticNarration,
+        setting: 'automaticNarration',
+      },
+      LIP_SYNC: {
+        enabled: config.automaticMotionGeneration,
+        setting: 'automaticMotionGeneration',
+      },
+      AUDIO_MIX: {
+        enabled: config.automaticNarration,
+        setting: 'automaticNarration',
+      },
       RENDER: {
         enabled: config.automaticRendering,
         setting: 'automaticRendering',
@@ -952,17 +1009,209 @@ export class SeriesOrchestratorService {
     };
   }
 
+  private async ensureDialogueVoiceAssignment(
+    payload: SeriesEpisodeProductionPayload,
+    run: { id: string },
+  ) {
+    await this.dialogueProduction.ensureVoiceAssignment(payload.userId, payload.seriesId);
+    await this.completeStage(run.id, 'VOICE_ASSIGNMENT' as SeriesProductionStageName);
+    await this.enqueueAdvance(
+      payload.userId,
+      payload.seriesId,
+      payload.episodeId,
+      'advance',
+      stagePollDelayMs(500, false),
+      run.id,
+      payload.useMockAi,
+    );
+    return { completed: true, stage: 'VOICE_ASSIGNMENT' };
+  }
+
+  private async ensureDialogueAudio(
+    payload: SeriesEpisodeProductionPayload,
+    run: { id: string },
+    useMockAi: boolean,
+  ) {
+    const lines = await this.prisma.episodeDialogueLine.findMany({
+      where: { episodeId: payload.episodeId, userId: payload.userId },
+    });
+    if (lines.length === 0) {
+      throw new Error('No dialogue lines materialized for DIALOGUE_AUDIO stage');
+    }
+
+    // Enqueue dedicated dialogue-audio worker job; poll until lines leave AUDIO_PENDING.
+    const pending = lines.filter((l) => l.status === 'AUDIO_PENDING' || l.status === 'DRAFT');
+    if (pending.length > 0) {
+      await this.queueService.getQueue(QUEUE_NAMES.SERIES_DIALOGUE_AUDIO).add(
+        'dialogue_audio',
+        {
+          userId: payload.userId,
+          seriesId: payload.seriesId,
+          episodeId: payload.episodeId,
+          productionRunId: run.id,
+          useMockAi,
+        },
+        { jobId: bullMqJobId('series-dialogue-audio', payload.episodeId, run.id) },
+      );
+      await this.enqueueAdvance(
+        payload.userId,
+        payload.seriesId,
+        payload.episodeId,
+        'advance',
+        stagePollDelayMs(5000, useMockAi),
+        run.id,
+        useMockAi,
+      );
+      return { waiting: true, stage: 'DIALOGUE_AUDIO', pending: pending.length };
+    }
+
+    await this.completeStage(run.id, 'DIALOGUE_AUDIO' as SeriesProductionStageName);
+    await this.enqueueAdvance(
+      payload.userId,
+      payload.seriesId,
+      payload.episodeId,
+      'advance',
+      stagePollDelayMs(500, useMockAi),
+      run.id,
+      useMockAi,
+    );
+    return { completed: true, stage: 'DIALOGUE_AUDIO' };
+  }
+
+  private async ensureLipSync(
+    payload: SeriesEpisodeProductionPayload,
+    run: { id: string },
+    useMockAi: boolean,
+  ) {
+    await this.dialogueProduction.createLipSyncJobs(
+      payload.userId,
+      payload.episodeId,
+    );
+    await this.queueService.getQueue(QUEUE_NAMES.SERIES_LIP_SYNC).add(
+      'lip_sync',
+      {
+        userId: payload.userId,
+        seriesId: payload.seriesId,
+        episodeId: payload.episodeId,
+        productionRunId: run.id,
+        useMockAi,
+      },
+      { jobId: bullMqJobId('series-lip-sync', payload.episodeId, run.id) },
+    );
+
+    const required = await this.prisma.episodeShot.count({
+      where: { episodeId: payload.episodeId, requiresLipSync: true },
+    });
+    const completed = await this.prisma.lipSyncJob.count({
+      where: {
+        episodeId: payload.episodeId,
+        status: 'COMPLETED',
+      },
+    });
+    if (required > 0 && completed < required) {
+      await this.enqueueAdvance(
+        payload.userId,
+        payload.seriesId,
+        payload.episodeId,
+        'advance',
+        stagePollDelayMs(8000, useMockAi),
+        run.id,
+        useMockAi,
+      );
+      return { waiting: true, stage: 'LIP_SYNC', required, completed };
+    }
+
+    await this.completeStage(run.id, 'LIP_SYNC' as SeriesProductionStageName);
+    await this.enqueueAdvance(
+      payload.userId,
+      payload.seriesId,
+      payload.episodeId,
+      'advance',
+      stagePollDelayMs(500, useMockAi),
+      run.id,
+      useMockAi,
+    );
+    return {
+      completed: true,
+      stage: 'LIP_SYNC',
+      required,
+      lipSyncCompleted: completed,
+    };
+  }
+
+  private async ensureDialogueAudioMix(
+    payload: SeriesEpisodeProductionPayload,
+    run: { id: string },
+  ) {
+    const lines = await this.prisma.episodeDialogueLine.findMany({
+      where: { episodeId: payload.episodeId },
+      orderBy: [{ sceneOrder: 'asc' }, { shotOrder: 'asc' }, { lineOrder: 'asc' }],
+    });
+    const cueSheet = lines.map((line) => ({
+      speaker: line.speakerName,
+      text: line.text,
+      startMs: line.startMs,
+      endMs: line.endMs,
+      audioMediaAssetId: line.audioMediaAssetId,
+    }));
+    const subtitleCues = lines.map((line) => ({
+      speaker: line.speakerName,
+      text: line.text,
+      startMs: line.startMs ?? 0,
+      endMs: line.endMs ?? 0,
+    }));
+
+    await this.prisma.episodeAudioMix.upsert({
+      where: {
+        episodeId_version: { episodeId: payload.episodeId, version: 1 },
+      },
+      create: {
+        userId: payload.userId,
+        episodeId: payload.episodeId,
+        version: 1,
+        status: 'READY',
+        dialogueGainDb: 0,
+        musicGainDb: -12,
+        ambientGainDb: -18,
+        cueSheet: cueSheet as unknown as Prisma.InputJsonValue,
+        subtitleCues: subtitleCues as unknown as Prisma.InputJsonValue,
+        idempotencyKey: `${payload.episodeId}:audio-mix:1`,
+      },
+      update: {
+        status: 'READY',
+        cueSheet: cueSheet as unknown as Prisma.InputJsonValue,
+        subtitleCues: subtitleCues as unknown as Prisma.InputJsonValue,
+      },
+    });
+
+    await this.completeStage(run.id, 'AUDIO_MIX' as SeriesProductionStageName);
+    await this.enqueueAdvance(
+      payload.userId,
+      payload.seriesId,
+      payload.episodeId,
+      'advance',
+      stagePollDelayMs(500, false),
+      run.id,
+      payload.useMockAi,
+    );
+    return { completed: true, stage: 'AUDIO_MIX', cues: cueSheet.length };
+  }
+
   private async completeStage(
     runId: string,
-    stage: SeriesProductionStageName,
+    stage: SeriesProductionStageName | SeriesDialogueProductionStageName,
     extraMeta?: Record<string, unknown>,
   ) {
-    const next = nextSeriesProductionStage(stage);
     const run = await this.prisma.seriesProductionRun.findUniqueOrThrow({
       where: { id: runId },
     });
+    const priorMeta = (run.metadata as Record<string, unknown>) ?? {};
+    const dialogueDriven = priorMeta.dialogueDriven === true;
+    const next = dialogueDriven
+      ? nextSeriesDialogueProductionStage(stage as SeriesDialogueProductionStageName)
+      : nextSeriesProductionStage(stage as SeriesProductionStageName);
     const meta = {
-      ...((run.metadata as Record<string, unknown>) ?? {}),
+      ...priorMeta,
       ...(extraMeta ?? {}),
       [`completed:${stage}`]: new Date().toISOString(),
     };

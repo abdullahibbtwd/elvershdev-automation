@@ -6,6 +6,7 @@ export * from './story-ai';
 export * from './visual-ai';
 export * from './motion-ai';
 export * from './voice-ai';
+export * from './lip-sync-ai';
 export * from './render-ai';
 export * from './social';
 export * from './automation';

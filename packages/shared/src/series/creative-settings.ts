@@ -28,6 +28,57 @@ export const SERIES_THEME_OPTIONS = [
 ] as const;
 
 export const SERIES_CLIFFHANGER_INTENSITY = ['low', 'medium', 'high'] as const;
+export const SERIES_NARRATION_PREFERENCE = ['avoid', 'allowed', 'required'] as const;
+export const SERIES_DIALOGUE_DENSITY = ['low', 'medium', 'high'] as const;
+export const SERIES_COST_MODE_OPTIONS = ['quality', 'balanced', 'economy'] as const;
+
+/** Product default creative direction for Series Studio dialogue-driven lanes. */
+export const SERIES_DIALOGUE_CREATIVE_DEFAULTS = {
+  dialogueDrivenStorytelling: true,
+  narrationPreference: 'avoid' as const,
+  dialogueDensity: 'high' as const,
+  lipSyncRequired: true,
+  subtitlePreference: true,
+  aspectRatio: '9:16',
+  episodeDurationSeconds: 60,
+  episodesPerMovie: 10,
+  language: 'en',
+  /** balanced = lip-sync on speech + FFmpeg for reactions/env; avoid Hailuo on dialogue path. */
+  costMode: 'balanced' as const,
+  reuseCharacterReferences: true,
+  preferFfmpegForReactions: true,
+  maxLipSyncSecondsPerEpisode: 24,
+  visualStyle:
+    'Semi-realistic cinematic 3D. Human-looking adult and child characters where appropriate, realistic human proportions, detailed facial features, natural skin textures, expressive eyes, realistic clothing, detailed everyday environments and emotionally expressive animation. High-quality animated movie look — not a childish cartoon.',
+  cinematicShotStyle:
+    'Cinematic shot-reverse-shot conversations with close-ups, medium shots, over-the-shoulder angles, and reaction shots.',
+  characterAnimationStyle:
+    'Natural mouth sync to speech, expressive faces, believable gestures and body language during conversation.',
+  dialogueStyle:
+    'Natural, simple everyday conversations. Characters speak to each other; avoid narrator explaining the story.',
+  characterVoiceStyle: 'Distinct consistent voices per character; emotional but clear speech.',
+  accentPreference: 'Clear everyday spoken English; regional accent only when character canon requires it.',
+  storytellingRules: [
+    'Generate simple, relatable, everyday-life stories.',
+    'Focus on one main problem that develops through conversations.',
+    'Avoid fantasy, supernatural elements, overly complicated plots, and excessive characters.',
+    'Each episode ~40–60 seconds: hook, conflict, emotional moment, cliffhanger.',
+  ],
+  contentExclusions: [
+    'Narrator-led slideshow storytelling',
+    'Unrelated cinematic B-roll over narration',
+    'Silent characters while a narrator explains everything',
+  ],
+  genres: ['Family drama', 'Social drama'],
+  themes: [
+    'Family conflict',
+    'Sibling rivalry',
+    'Favouritism',
+    'Jealousy',
+    'Betrayal',
+    'Discrimination',
+  ],
+} as const;
 
 export const seriesCreativeSettingsSchema = z.object({
   genres: z.array(z.string().min(1).max(80)).max(12).default([]),
@@ -51,6 +102,25 @@ export const seriesCreativeSettingsSchema = z.object({
   aspectRatio: z.string().max(20).optional(),
   storyConcept: z.string().max(8000).optional(),
   customCreativeInstructions: z.string().max(8000).optional(),
+  /**
+   * Opt-in dialogue-driven cinematic production.
+   * Default false so existing narration lanes stay on Hailuo/narration until explicitly enabled.
+   */
+  dialogueDrivenStorytelling: z.boolean().optional().default(false),
+  narrationPreference: z.enum(SERIES_NARRATION_PREFERENCE).optional().default('allowed'),
+  dialogueDensity: z.enum(SERIES_DIALOGUE_DENSITY).optional().default('medium'),
+  characterVoiceStyle: z.string().max(500).optional(),
+  accentPreference: z.string().max(200).optional(),
+  dialogueLanguage: z.string().min(2).max(10).optional(),
+  lipSyncRequired: z.boolean().optional().default(true),
+  subtitlePreference: z.boolean().optional().default(true),
+  cinematicShotStyle: z.string().max(1000).optional(),
+  characterAnimationStyle: z.string().max(1000).optional(),
+  /** Cost / production efficiency controls for dialogue-driven episodes. */
+  costMode: z.enum(SERIES_COST_MODE_OPTIONS).optional().default('balanced'),
+  reuseCharacterReferences: z.boolean().optional().default(true),
+  preferFfmpegForReactions: z.boolean().optional().default(true),
+  maxLipSyncSecondsPerEpisode: z.number().min(6).max(60).optional().default(24),
 });
 
 export type SeriesCreativeSettings = z.infer<typeof seriesCreativeSettingsSchema>;
@@ -143,7 +213,34 @@ export function creativeSettingsToBriefFields(settings: SeriesCreativeSettings):
     settings.narrationPreferences
       ? `Narration preferences: ${settings.narrationPreferences}`
       : null,
+    settings.dialogueDrivenStorytelling === true
+      ? 'Dialogue-driven storytelling is required: characters speak to each other; avoid narrator-led format.'
+      : null,
+    settings.narrationPreference
+      ? `Narration preference mode: ${settings.narrationPreference}`
+      : null,
+    settings.dialogueDensity ? `Dialogue density: ${settings.dialogueDensity}` : null,
     settings.dialogueStyle ? `Dialogue style: ${settings.dialogueStyle}` : null,
+    settings.characterVoiceStyle
+      ? `Character voice style: ${settings.characterVoiceStyle}`
+      : null,
+    settings.accentPreference ? `Accent preference: ${settings.accentPreference}` : null,
+    settings.lipSyncRequired ? 'Lip-sync is mandatory for speaking shots.' : null,
+    settings.costMode
+      ? `Cost mode: ${settings.costMode}. Prefer Kling lip-sync only for speaking shots; use local FFmpeg camera moves for reaction/environment shots; do not use Hailuo for dialogue-driven episodes.`
+      : null,
+    settings.maxLipSyncSecondsPerEpisode
+      ? `Keep total speaking/lip-sync duration near or under ${settings.maxLipSyncSecondsPerEpisode}s for a ~${settings.episodeDurationSeconds ?? 60}s episode.`
+      : null,
+    settings.preferFfmpegForReactions
+      ? 'Reaction and environment coverage should be short still-based cinematic moves, not paid video generation.'
+      : null,
+    settings.cinematicShotStyle
+      ? `Cinematic shot style: ${settings.cinematicShotStyle}`
+      : null,
+    settings.characterAnimationStyle
+      ? `Character animation style: ${settings.characterAnimationStyle}`
+      : null,
     settings.dialogueStyle || settings.customCreativeInstructions
       ? 'Language priority: keep dialogue and narration in clear everyday spoken English even when tone/concept is dramatic or cinematic.'
       : null,
@@ -180,9 +277,17 @@ export function buildCreativeLanguageStyleNotes(
 ): string {
   return [
     settings.language ? `Language: ${settings.language}` : null,
+    settings.dialogueLanguage ? `Dialogue language: ${settings.dialogueLanguage}` : null,
     settings.tone ? `Tone: ${settings.tone}` : null,
     settings.narrativeTone ? `Narrative tone: ${settings.narrativeTone}` : null,
     settings.dialogueStyle ? `Dialogue style: ${settings.dialogueStyle}` : null,
+    settings.characterVoiceStyle
+      ? `Character voice style: ${settings.characterVoiceStyle}`
+      : null,
+    settings.accentPreference ? `Accent preference: ${settings.accentPreference}` : null,
+    settings.narrationPreference
+      ? `Narration preference: ${settings.narrationPreference}`
+      : null,
     settings.narrationPreferences
       ? `Narration preferences: ${settings.narrationPreferences}`
       : null,
@@ -192,4 +297,12 @@ export function buildCreativeLanguageStyleNotes(
   ]
     .filter(Boolean)
     .join('\n');
+}
+
+export function isDialogueDrivenCreative(
+  settings: SeriesCreativeSettings | null | undefined,
+): boolean {
+  // Opt-in only: empty / legacy narration configs stay on the narration path.
+  if (!settings) return false;
+  return settings.dialogueDrivenStorytelling === true;
 }

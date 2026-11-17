@@ -22,6 +22,16 @@ export type SeriesCreativeSettings = {
   aspectRatio?: string;
   storyConcept?: string;
   customCreativeInstructions?: string;
+  dialogueDrivenStorytelling?: boolean;
+  narrationPreference?: 'avoid' | 'allowed' | 'required';
+  dialogueDensity?: 'low' | 'medium' | 'high';
+  characterVoiceStyle?: string;
+  accentPreference?: string;
+  dialogueLanguage?: string;
+  lipSyncRequired?: boolean;
+  subtitlePreference?: boolean;
+  cinematicShotStyle?: string;
+  characterAnimationStyle?: string;
 };
 
 export type SeriesProductionStartMode =

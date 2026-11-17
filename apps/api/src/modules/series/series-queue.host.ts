@@ -5,8 +5,10 @@ import {
   QUEUE_NAMES,
   type SeriesCharacterGenerationPayload,
   type SeriesContinuityValidationPayload,
+  type SeriesDialogueAudioPayload,
   type SeriesEpisodePlanningPayload,
   type SeriesEpisodeProductionPayload,
+  type SeriesLipSyncPayload,
   type SeriesMaintenancePayload,
   type SeriesPublishingPayload,
   type SeriesReplacementPlanningPayload,
@@ -18,6 +20,7 @@ import { shouldRunQueueHosts } from '../../common/process-role';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CharacterDirectorService } from './character-director.service';
 import { ContinuityEngineService } from './continuity-engine.service';
+import { DialogueProductionService } from './dialogue-production.service';
 import { EpisodeDirectorService } from './episode-director.service';
 import { MovieArchitectService } from './movie-architect.service';
 import { SeriesMaintenanceService } from './series-maintenance.service';
@@ -47,6 +50,7 @@ export class SeriesQueueHost implements OnModuleInit, OnModuleDestroy {
     private readonly publishScheduler: SeriesPublishSchedulerService,
     private readonly orchestrator: SeriesOrchestratorService,
     private readonly maintenance: SeriesMaintenanceService,
+    private readonly dialogueProduction: DialogueProductionService,
   ) {}
 
   private async settleStoryPlanningExecution(
@@ -245,6 +249,61 @@ export class SeriesQueueHost implements OnModuleInit, OnModuleDestroy {
         QUEUE_NAMES.SERIES_MAINTENANCE,
         async (job: Job<SeriesMaintenancePayload>) => {
           return this.maintenance.run(job.data.mode);
+        },
+        { connection: this.connection, concurrency: 1 },
+      ),
+      new Worker(
+        QUEUE_NAMES.SERIES_DIALOGUE_AUDIO,
+        async (job: Job<SeriesDialogueAudioPayload>) => {
+          return this.dialogueProduction.generateDialogueAudioForEpisode(
+            job.data.userId,
+            job.data.episodeId,
+            { useMockAi: job.data.useMockAi },
+          );
+        },
+        { connection: this.connection, concurrency: 1 },
+      ),
+      new Worker(
+        QUEUE_NAMES.SERIES_LIP_SYNC,
+        async (job: Job<SeriesLipSyncPayload>) => {
+          if (job.data.lipSyncJobId) {
+            // Single-job path reserved for retries.
+          }
+          await this.dialogueProduction.createLipSyncJobs(
+            job.data.userId,
+            job.data.episodeId,
+          );
+          const forceMock =
+            job.data.useMockAi === true || process.env.LIP_SYNC_USE_MOCK === 'true';
+          if (forceMock) {
+            // Mock path only — example fal sample assets. Never use these for real-provider claims.
+            const pending = await this.prisma.lipSyncJob.findMany({
+              where: {
+                episodeId: job.data.episodeId,
+                status: { in: ['PENDING', 'QUEUED'] },
+              },
+            });
+            for (const row of pending) {
+              await this.prisma.lipSyncJob.update({
+                where: { id: row.id },
+                data: {
+                  sourceImageUrl:
+                    row.sourceImageUrl ??
+                    'https://storage.googleapis.com/falserverless/example_inputs/kling_ai_avatar_input.jpg',
+                  sourceAudioUrl:
+                    row.sourceAudioUrl ??
+                    'https://v3.fal.media/files/rabbit/9_0ZG_geiWjZOmn9yscO6_output.mp3',
+                  mocked: true,
+                },
+              });
+            }
+          }
+          // Real mode: never force mock. Mock only when explicitly configured.
+          return this.dialogueProduction.processPendingLipSyncJobs(
+            job.data.userId,
+            job.data.episodeId,
+            { forceMock: forceMock ? true : undefined },
+          );
         },
         { connection: this.connection, concurrency: 1 },
       ),

@@ -42,6 +42,11 @@ export const QUEUE_NAMES = {
   SERIES_REPLACEMENT_PLANNING: 'series-replacement-planning',
   SERIES_PUBLISHING: 'series-publishing',
   SERIES_MAINTENANCE: 'series-maintenance',
+  /** Dialogue-driven talking-character stages (Series Studio only) */
+  SERIES_DIALOGUE_AUDIO: 'series-dialogue-audio',
+  SERIES_LIP_SYNC: 'series-lip-sync',
+  SERIES_SHOT_STILLS: 'series-shot-stills',
+  SERIES_AUDIO_MIX: 'series-audio-mix',
 } as const;
 
 export type QueueName = (typeof QUEUE_NAMES)[keyof typeof QUEUE_NAMES];
@@ -83,6 +88,10 @@ export const ALL_QUEUE_NAMES = [
   QUEUE_NAMES.SERIES_REPLACEMENT_PLANNING,
   QUEUE_NAMES.SERIES_PUBLISHING,
   QUEUE_NAMES.SERIES_MAINTENANCE,
+  QUEUE_NAMES.SERIES_DIALOGUE_AUDIO,
+  QUEUE_NAMES.SERIES_LIP_SYNC,
+  QUEUE_NAMES.SERIES_SHOT_STILLS,
+  QUEUE_NAMES.SERIES_AUDIO_MIX,
 ] as const;
 
 export const JOB_TYPE_TO_QUEUE = {
@@ -381,4 +390,41 @@ export interface SeriesMaintenancePayload {
   mode: SeriesMaintenanceMode;
   userId?: string;
   laneId?: string;
+}
+
+export interface SeriesDialogueAudioPayload {
+  userId: string;
+  seriesId: string;
+  episodeId: string;
+  productionRunId?: string;
+  useMockAi?: boolean;
+  force?: boolean;
+}
+
+export interface SeriesLipSyncPayload {
+  userId: string;
+  seriesId: string;
+  episodeId: string;
+  lipSyncJobId?: string;
+  productionRunId?: string;
+  useMockAi?: boolean;
+  force?: boolean;
+}
+
+export interface SeriesShotStillsPayload {
+  userId: string;
+  seriesId: string;
+  episodeId: string;
+  productionRunId?: string;
+  useMockAi?: boolean;
+  force?: boolean;
+}
+
+export interface SeriesAudioMixPayload {
+  userId: string;
+  seriesId: string;
+  episodeId: string;
+  productionRunId?: string;
+  useMockAi?: boolean;
+  force?: boolean;
 }

@@ -1025,6 +1025,7 @@ export function SeriesSettingsPage() {
                   onChange={(e) =>
                     setLaneCreative((prev) => ({ ...prev, visualStyle: e.target.value }))
                   }
+                  placeholder="Semi-realistic cinematic 3D…"
                 />
               </Field>
               <Field label="Tone">
@@ -1033,7 +1034,74 @@ export function SeriesSettingsPage() {
                   onChange={(e) => setLaneCreative((prev) => ({ ...prev, tone: e.target.value }))}
                 />
               </Field>
+              <Field label="Dialogue density">
+                <Input
+                  value={laneCreative.dialogueDensity ?? 'high'}
+                  onChange={(e) =>
+                    setLaneCreative((prev) => ({
+                      ...prev,
+                      dialogueDensity: e.target.value as SeriesCreativeSettings['dialogueDensity'],
+                    }))
+                  }
+                  placeholder="high | medium | low"
+                />
+              </Field>
+              <Field label="Narration preference">
+                <Input
+                  value={laneCreative.narrationPreference ?? 'avoid'}
+                  onChange={(e) =>
+                    setLaneCreative((prev) => ({
+                      ...prev,
+                      narrationPreference: e.target
+                        .value as SeriesCreativeSettings['narrationPreference'],
+                    }))
+                  }
+                  placeholder="avoid | allowed | required"
+                />
+              </Field>
             </div>
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={laneCreative.dialogueDrivenStorytelling === true}
+                onChange={(e) =>
+                  setLaneCreative((prev) => ({
+                    ...prev,
+                    dialogueDrivenStorytelling: e.target.checked,
+                    ...(e.target.checked
+                      ? { narrationPreference: 'avoid' as const }
+                      : { narrationPreference: 'required' as const }),
+                  }))
+                }
+              />
+              Dialogue-driven storytelling (characters speak; no narrator slideshow)
+            </label>
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={laneCreative.lipSyncRequired !== false}
+                onChange={(e) =>
+                  setLaneCreative((prev) => ({
+                    ...prev,
+                    lipSyncRequired: e.target.checked,
+                  }))
+                }
+              />
+              Require lip-sync for speaking shots
+            </label>
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={laneCreative.subtitlePreference !== false}
+                onChange={(e) =>
+                  setLaneCreative((prev) => ({
+                    ...prev,
+                    subtitlePreference: e.target.checked,
+                  }))
+                }
+              />
+              Generate dialogue subtitles
+            </label>
             <Field label="Story concept / creative instructions">
               <Input
                 value={laneCreative.storyConcept ?? ''}

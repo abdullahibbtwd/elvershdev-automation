@@ -55,6 +55,10 @@ export default () => ({
     falUseMock: process.env.FAL_USE_MOCK ?? 'false',
     falSupportsReference: process.env.FAL_IMAGE_SUPPORTS_REFERENCE,
     falSupportsNegativePrompt: process.env.FAL_IMAGE_SUPPORTS_NEGATIVE_PROMPT,
+    /** Series dialogue lip-sync: kling_avatar_v2_standard | kling_avatar_v2_pro | omnihuman */
+    lipSyncProvider: process.env.LIP_SYNC_PROVIDER ?? 'kling_avatar_v2_standard',
+    lipSyncUseMock: process.env.LIP_SYNC_USE_MOCK ?? 'false',
+    lipSyncPricePerSecondUsd: process.env.LIP_SYNC_PRICE_PER_SECOND_USD,
     videoGenerationProvider: process.env.VIDEO_GENERATION_PROVIDER ?? 'hailuo',
     hailuoEnabled: process.env.HAILUO_ENABLED ?? 'true',
     hailuoModel:

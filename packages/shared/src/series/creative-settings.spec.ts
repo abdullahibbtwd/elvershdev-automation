@@ -1,7 +1,9 @@
 import {
   creativeSettingsToBriefFields,
+  isDialogueDrivenCreative,
   mergeSeriesCreativeSettings,
   parseSeriesCreativeSettings,
+  SERIES_DIALOGUE_CREATIVE_DEFAULTS,
   seriesCreativeSettingsSchema,
 } from './creative-settings';
 
@@ -58,5 +60,25 @@ describe('series creative settings', () => {
     );
     expect(fields.theme!.length).toBeLessThanOrEqual(300);
     expect(fields.additionalInstructions).toContain('Themes (full):');
+  });
+
+  it('keeps narration path unless dialogue is explicitly enabled', () => {
+    expect(isDialogueDrivenCreative(null)).toBe(false);
+    expect(isDialogueDrivenCreative(parseSeriesCreativeSettings({}))).toBe(false);
+    expect(
+      isDialogueDrivenCreative(
+        parseSeriesCreativeSettings({ dialogueDrivenStorytelling: false }),
+      ),
+    ).toBe(false);
+    expect(
+      isDialogueDrivenCreative(
+        parseSeriesCreativeSettings({ dialogueDrivenStorytelling: true }),
+      ),
+    ).toBe(true);
+    expect(
+      isDialogueDrivenCreative(
+        parseSeriesCreativeSettings(SERIES_DIALOGUE_CREATIVE_DEFAULTS),
+      ),
+    ).toBe(true);
   });
 });

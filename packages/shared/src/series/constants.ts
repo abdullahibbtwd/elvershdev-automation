@@ -99,6 +99,28 @@ export const SERIES_PRODUCTION_STAGE_ORDER = [
 
 export type SeriesProductionStageName = (typeof SERIES_PRODUCTION_STAGE_ORDER)[number];
 
+/**
+ * Dialogue-driven Series Studio production stages.
+ * Replaces Hailuo-primary motion + narrator speech with per-line TTS + lip-sync shots.
+ */
+export const SERIES_DIALOGUE_PRODUCTION_STAGE_ORDER = [
+  'MATERIALIZE',
+  'VOICE_ASSIGNMENT',
+  'VISUAL_INTELLIGENCE',
+  'DIALOGUE_AUDIO',
+  'LIP_SYNC',
+  'AUDIO_MIX',
+  'RENDER',
+  'DONE',
+] as const;
+
+export type SeriesDialogueProductionStageName =
+  (typeof SERIES_DIALOGUE_PRODUCTION_STAGE_ORDER)[number];
+
+export type SeriesAnyProductionStageName =
+  | SeriesProductionStageName
+  | SeriesDialogueProductionStageName;
+
 export function nextSeriesProductionStage(
   stage: SeriesProductionStageName,
 ): SeriesProductionStageName | null {
@@ -107,4 +129,14 @@ export function nextSeriesProductionStage(
     return null;
   }
   return SERIES_PRODUCTION_STAGE_ORDER[index + 1];
+}
+
+export function nextSeriesDialogueProductionStage(
+  stage: SeriesDialogueProductionStageName,
+): SeriesDialogueProductionStageName | null {
+  const index = SERIES_DIALOGUE_PRODUCTION_STAGE_ORDER.indexOf(stage);
+  if (index < 0 || index >= SERIES_DIALOGUE_PRODUCTION_STAGE_ORDER.length - 1) {
+    return null;
+  }
+  return SERIES_DIALOGUE_PRODUCTION_STAGE_ORDER[index + 1];
 }

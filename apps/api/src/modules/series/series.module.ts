@@ -10,7 +10,9 @@ import { PublishingModule } from '../publishing/publishing.module';
 import { RenderingModule } from '../rendering/rendering.module';
 import { VisualsModule } from '../visuals/visuals.module';
 import { CharacterDirectorService } from './character-director.service';
+import { CharacterVoiceService } from './character-voice.service';
 import { ContinuityEngineService } from './continuity-engine.service';
+import { DialogueProductionService } from './dialogue-production.service';
 import { EpisodeDirectorService } from './episode-director.service';
 import { MovieArchitectService } from './movie-architect.service';
 import { SeriesConfigService } from './series-config.service';
@@ -50,7 +52,9 @@ import { StoryQualityEvaluatorService } from './story-quality-evaluator.service'
     SeriesLibraryService,
     StoryQualityEvaluatorService,
     CharacterDirectorService,
+    CharacterVoiceService,
     ContinuityEngineService,
+    DialogueProductionService,
     EpisodeDirectorService,
     MovieArchitectService,
     SeriesReplacementService,
@@ -70,7 +74,9 @@ import { StoryQualityEvaluatorService } from './story-quality-evaluator.service'
     SeriesLibraryService,
     MovieArchitectService,
     CharacterDirectorService,
+    CharacterVoiceService,
     ContinuityEngineService,
+    DialogueProductionService,
     EpisodeDirectorService,
     SeriesReplacementService,
     SeriesPublishSchedulerService,

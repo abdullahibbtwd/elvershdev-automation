@@ -341,6 +341,10 @@ model User {
   seriesReplacementPlans      SeriesReplacementPlan[]
   seriesAuditLogs             SeriesAuditLog[]
   seriesExecutions            SeriesExecution[]
+  lipSyncJobs                 LipSyncJob[]
+  episodeDialogueLines        EpisodeDialogueLine[]
+  episodeShots                EpisodeShot[]
+  episodeAudioMixes           EpisodeAudioMix[]
 
   @@index([email])
   @@map("users")
@@ -740,6 +744,14 @@ model MediaAsset {
   videoRenderSubtitles      VideoRender[]              @relation("VideoRenderSubtitle")
   videoRenderMusic          VideoRender[]              @relation("VideoRenderMusic")
   seriesPosters             StorySeries[]              @relation("SeriesPoster")
+  lipSyncSourceImages       LipSyncJob[]               @relation("LipSyncSourceImage")
+  lipSyncSourceAudio        LipSyncJob[]               @relation("LipSyncSourceAudio")
+  lipSyncOutputVideos       LipSyncJob[]               @relation("LipSyncOutputVideo")
+  dialogueLineAudioAssets   EpisodeDialogueLine[]      @relation("DialogueLineAudio")
+  episodeShotStills         EpisodeShot[]              @relation("EpisodeShotStill")
+  episodeShotVideos         EpisodeShot[]              @relation("EpisodeShotVideo")
+  episodeAudioMixAssets     EpisodeAudioMix[]          @relation("EpisodeAudioMixAsset")
+  episodeSubtitleAssets     EpisodeAudioMix[]          @relation("EpisodeSubtitleAsset")
 
   @@index([userId])
   @@index([videoProjectId])
@@ -913,6 +925,8 @@ model VoiceProfile {
 
   user             User              @relation(fields: [userId], references: [id], onDelete: Cascade)
   audioGenerations AudioGeneration[]
+  seriesCharacterVoices SeriesCharacterVoice[]
+  episodeDialogueLines EpisodeDialogueLine[]
 
   @@unique([userId, name])
   @@index([userId])
@@ -1797,6 +1811,34 @@ enum SeriesScheduleState {
   MISSED
 }
 
+enum LipSyncJobStatus {
+  PENDING
+  QUEUED
+  GENERATING
+  DOWNLOADING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum DialogueLineStatus {
+  DRAFT
+  AUDIO_PENDING
+  AUDIO_READY
+  LIP_SYNC_PENDING
+  LIP_SYNC_READY
+  FAILED
+}
+
+enum EpisodeShotStatus {
+  PLANNED
+  STILL_PENDING
+  STILL_READY
+  ANIMATING
+  READY
+  FAILED
+}
+
 enum SeriesProductionRunStatus {
   PENDING
   RUNNING
@@ -2092,6 +2134,7 @@ model SeriesCharacter {
 
   series           StorySeries               @relation(fields: [seriesId], references: [id], onDelete: Cascade)
   referenceAssets  CharacterReferenceAsset[]
+  characterVoice   SeriesCharacterVoice?
 
   @@unique([seriesId, name])
   @@index([seriesId])
@@ -2168,6 +2211,10 @@ model SeriesEpisode {
   memoryEvents        SeriesMemoryEvent[]
   schedules           SeriesSchedule[]
   productionRuns      SeriesProductionRun[]
+  dialogueLines       EpisodeDialogueLine[]
+  shots               EpisodeShot[]
+  audioMixes          EpisodeAudioMix[]
+  lipSyncJobs         LipSyncJob[]
 
   @@unique([seriesId, episodeNumber])
   @@index([seriesId])
@@ -2372,4 +2419,202 @@ model SeriesAuditLog {
   @@index([userId, createdAt])
   @@index([entityType, entityId])
   @@map("series_audit_logs")
+}
+
+/// Persistent Gemini (or future) voice assignment for a Series character.
+model SeriesCharacterVoice {
+  id                   String   @id @default(uuid())
+  seriesCharacterId    String   @unique @map("series_character_id")
+  voiceProfileId       String   @map("voice_profile_id")
+  provider             String   @default("gemini")
+  providerVoiceId      String   @map("provider_voice_id")
+  voiceDescription     String?  @map("voice_description") @db.Text
+  genderPresentation   String?  @map("gender_presentation")
+  approximateVocalAge  String?  @map("approximate_vocal_age")
+  accent               String?
+  pitch                String?
+  speakingStyle        String?  @map("speaking_style") @db.Text
+  emotionalRange       Json     @default("[]") @map("emotional_range")
+  speechSpeed          String   @default("normal") @map("speech_speed")
+  consistencyLocked    Boolean  @default(true) @map("consistency_locked")
+  metadata             Json     @default("{}")
+  createdAt            DateTime @default(now()) @map("created_at")
+  updatedAt            DateTime @updatedAt @map("updated_at")
+
+  seriesCharacter SeriesCharacter @relation(fields: [seriesCharacterId], references: [id], onDelete: Cascade)
+  voiceProfile    VoiceProfile    @relation(fields: [voiceProfileId], references: [id], onDelete: Restrict)
+
+  @@index([voiceProfileId])
+  @@index([provider, providerVoiceId])
+  @@map("series_character_voices")
+}
+
+model EpisodeDialogueLine {
+  id                String             @id @default(uuid())
+  userId            String             @map("user_id")
+  episodeId         String             @map("episode_id")
+  sceneOrder        Int                @map("scene_order")
+  shotOrder         Int                @map("shot_order")
+  lineOrder         Int                @map("line_order")
+  speakerName       String             @map("speaker_name")
+  seriesCharacterId String?            @map("series_character_id")
+  voiceProfileId    String?            @map("voice_profile_id")
+  text              String             @db.Text
+  emotion           String?
+  speakingStyle     String?            @map("speaking_style") @db.Text
+  status            DialogueLineStatus @default(DRAFT)
+  audioMediaAssetId String?            @unique @map("audio_media_asset_id")
+  durationSeconds   Float?             @map("duration_seconds")
+  startMs           Int?               @map("start_ms")
+  endMs             Int?               @map("end_ms")
+  estimatedCostUsd  Decimal?           @map("estimated_cost_usd") @db.Decimal(12, 6)
+  actualCostUsd     Decimal?           @map("actual_cost_usd") @db.Decimal(12, 6)
+  provider          String?
+  providerModel     String?            @map("provider_model")
+  idempotencyKey    String?            @unique @map("idempotency_key")
+  errorMessage      String?            @map("error_message") @db.Text
+  metadata          Json               @default("{}")
+  createdAt         DateTime           @default(now()) @map("created_at")
+  updatedAt         DateTime           @updatedAt @map("updated_at")
+
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  episode      SeriesEpisode @relation(fields: [episodeId], references: [id], onDelete: Cascade)
+  voiceProfile VoiceProfile? @relation(fields: [voiceProfileId], references: [id], onDelete: SetNull)
+  audioMediaAsset MediaAsset? @relation("DialogueLineAudio", fields: [audioMediaAssetId], references: [id], onDelete: SetNull)
+  shot         EpisodeShot?
+  lipSyncJobs  LipSyncJob[]
+
+  @@unique([episodeId, sceneOrder, shotOrder, lineOrder])
+  @@index([userId])
+  @@index([episodeId])
+  @@index([status])
+  @@index([speakerName])
+  @@map("episode_dialogue_lines")
+}
+
+model EpisodeShot {
+  id                   String           @id @default(uuid())
+  userId               String           @map("user_id")
+  episodeId            String           @map("episode_id")
+  sceneOrder           Int              @map("scene_order")
+  shotOrder            Int              @map("shot_order")
+  shotType             String           @map("shot_type")
+  speakerName          String?          @map("speaker_name")
+  dialogueLineId       String?          @unique @map("dialogue_line_id")
+  charactersVisible    Json             @default("[]") @map("characters_visible")
+  cameraDirection      String?          @map("camera_direction") @db.Text
+  cameraMovement       String?          @map("camera_movement")
+  facialExpression     String?          @map("facial_expression") @db.Text
+  bodyLanguage         String?          @map("body_language") @db.Text
+  environment          String?          @db.Text
+  lighting             String?
+  durationSeconds      Float            @map("duration_seconds")
+  requiresLipSync      Boolean          @default(false) @map("requires_lip_sync")
+  status               EpisodeShotStatus @default(PLANNED)
+  stillMediaAssetId    String?          @map("still_media_asset_id")
+  videoMediaAssetId    String?          @map("video_media_asset_id")
+  prompt               String?          @db.Text
+  estimatedCostUsd     Decimal?         @map("estimated_cost_usd") @db.Decimal(12, 6)
+  actualCostUsd        Decimal?         @map("actual_cost_usd") @db.Decimal(12, 6)
+  idempotencyKey       String?          @unique @map("idempotency_key")
+  errorMessage         String?          @map("error_message") @db.Text
+  metadata             Json             @default("{}")
+  createdAt            DateTime         @default(now()) @map("created_at")
+  updatedAt            DateTime         @updatedAt @map("updated_at")
+
+  user            User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  episode         SeriesEpisode        @relation(fields: [episodeId], references: [id], onDelete: Cascade)
+  dialogueLine    EpisodeDialogueLine? @relation(fields: [dialogueLineId], references: [id], onDelete: SetNull)
+  stillMediaAsset MediaAsset?          @relation("EpisodeShotStill", fields: [stillMediaAssetId], references: [id], onDelete: SetNull)
+  videoMediaAsset MediaAsset?          @relation("EpisodeShotVideo", fields: [videoMediaAssetId], references: [id], onDelete: SetNull)
+  lipSyncJobs     LipSyncJob[]
+
+  @@unique([episodeId, sceneOrder, shotOrder])
+  @@index([userId])
+  @@index([episodeId])
+  @@index([status])
+  @@index([requiresLipSync])
+  @@map("episode_shots")
+}
+
+model LipSyncJob {
+  id                  String          @id @default(uuid())
+  userId              String          @map("user_id")
+  episodeId           String          @map("episode_id")
+  episodeShotId       String?         @map("episode_shot_id")
+  dialogueLineId      String?         @map("dialogue_line_id")
+  provider            String
+  providerModel       String          @map("provider_model")
+  status              LipSyncJobStatus @default(PENDING)
+  progress            Int             @default(0)
+  sourceImageAssetId  String?         @map("source_image_asset_id")
+  sourceAudioAssetId  String?         @map("source_audio_asset_id")
+  sourceImageUrl      String?         @map("source_image_url") @db.Text
+  sourceAudioUrl      String?         @map("source_audio_url") @db.Text
+  outputMediaAssetId  String?         @unique @map("output_media_asset_id")
+  providerRequestId   String?         @map("provider_request_id")
+  durationSeconds     Float?          @map("duration_seconds")
+  estimatedCostUsd    Decimal?        @map("estimated_cost_usd") @db.Decimal(12, 6)
+  actualCostUsd       Decimal?        @map("actual_cost_usd") @db.Decimal(12, 6)
+  currency            String          @default("USD")
+  mocked              Boolean         @default(false)
+  attemptNumber       Int             @default(1) @map("attempt_number")
+  retryCount          Int             @default(0) @map("retry_count")
+  idempotencyKey      String?         @unique @map("idempotency_key")
+  generationJobId     String?         @map("generation_job_id")
+  errorCode           String?         @map("error_code")
+  errorMessage        String?         @map("error_message") @db.Text
+  providerMetadata    Json            @default("{}") @map("provider_metadata")
+  startedAt           DateTime?       @map("started_at")
+  completedAt         DateTime?       @map("completed_at")
+  createdAt           DateTime        @default(now()) @map("created_at")
+  updatedAt           DateTime        @updatedAt @map("updated_at")
+
+  user             User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  episode          SeriesEpisode        @relation(fields: [episodeId], references: [id], onDelete: Cascade)
+  episodeShot      EpisodeShot?         @relation(fields: [episodeShotId], references: [id], onDelete: SetNull)
+  dialogueLine     EpisodeDialogueLine? @relation(fields: [dialogueLineId], references: [id], onDelete: SetNull)
+  sourceImageAsset MediaAsset?          @relation("LipSyncSourceImage", fields: [sourceImageAssetId], references: [id], onDelete: SetNull)
+  sourceAudioAsset MediaAsset?          @relation("LipSyncSourceAudio", fields: [sourceAudioAssetId], references: [id], onDelete: SetNull)
+  outputMediaAsset MediaAsset?          @relation("LipSyncOutputVideo", fields: [outputMediaAssetId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([episodeId])
+  @@index([status])
+  @@index([provider])
+  @@index([generationJobId])
+  @@map("lip_sync_jobs")
+}
+
+model EpisodeAudioMix {
+  id                 String   @id @default(uuid())
+  userId             String   @map("user_id")
+  episodeId          String   @map("episode_id")
+  version            Int      @default(1)
+  status             String   @default("PENDING")
+  mixedAudioAssetId  String?  @unique @map("mixed_audio_asset_id")
+  subtitleAssetId    String?  @unique @map("subtitle_asset_id")
+  dialogueGainDb     Float?   @map("dialogue_gain_db")
+  musicGainDb        Float?   @map("music_gain_db")
+  ambientGainDb      Float?   @map("ambient_gain_db")
+  durationSeconds    Float?   @map("duration_seconds")
+  cueSheet           Json     @default("[]") @map("cue_sheet")
+  subtitleCues       Json     @default("[]") @map("subtitle_cues")
+  estimatedCostUsd   Decimal? @map("estimated_cost_usd") @db.Decimal(12, 6)
+  idempotencyKey     String?  @unique @map("idempotency_key")
+  errorMessage       String?  @map("error_message") @db.Text
+  metadata           Json     @default("{}")
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  episode         SeriesEpisode @relation(fields: [episodeId], references: [id], onDelete: Cascade)
+  mixedAudioAsset MediaAsset?   @relation("EpisodeAudioMixAsset", fields: [mixedAudioAssetId], references: [id], onDelete: SetNull)
+  subtitleAsset   MediaAsset?   @relation("EpisodeSubtitleAsset", fields: [subtitleAssetId], references: [id], onDelete: SetNull)
+
+  @@unique([episodeId, version])
+  @@index([userId])
+  @@index([episodeId])
+  @@index([status])
+  @@map("episode_audio_mixes")
 }

@@ -93,10 +93,42 @@ export class SeriesPipelineAdapterService {
     }
 
     const series = episode.series;
-    const durationPerScene = Math.max(
-      2,
-      Number((episode.targetDurationSeconds / episode.scenes.length).toFixed(2)),
-    );
+    const episodeMeta = (episode.metadata as Record<string, unknown> | null) ?? {};
+    const dialogueDriven = episodeMeta.dialogueDriven === true;
+    const dialoguePlan = episodeMeta.dialoguePlan as
+      | {
+          scenes?: Array<{
+            sceneNumber: number;
+            shots?: Array<{
+              shotOrder: number;
+              speaker: string;
+              dialogue: string;
+              facialExpression?: string;
+              bodyLanguage?: string;
+              cameraDirection?: string;
+              cameraMovement?: string;
+              environment?: string;
+              lighting?: string;
+              durationSeconds?: number;
+              charactersVisible?: string[];
+              shotType?: string;
+            }>;
+          }>;
+        }
+      | undefined;
+
+    const shotRows: Array<{
+      sceneNumber: number;
+      durationSeconds: number;
+      narration: string;
+      visualDescription: string;
+      imagePrompt: string;
+      videoPrompt: string;
+      cameraMovement: string;
+      lighting: string;
+      environment: string;
+      characterConsistencyInstructions: string;
+    }> = [];
 
     const characterNotesByName = new Map(
       series.characters.map((character) => [
@@ -105,6 +137,53 @@ export class SeriesPipelineAdapterService {
           character.canonicalVisualDescription ??
           character.physicalDescription,
       ]),
+    );
+
+    if (dialogueDriven && dialoguePlan?.scenes?.length) {
+      let sceneNumber = 0;
+      for (const scene of dialoguePlan.scenes) {
+        for (const shot of scene.shots ?? []) {
+          sceneNumber += 1;
+          const names = shot.charactersVisible?.length
+            ? shot.charactersVisible
+            : [shot.speaker];
+          const consistency = names
+            .map((name) => {
+              const note = characterNotesByName.get(name.toLowerCase());
+              return note ? `${name}: ${note}` : name;
+            })
+            .join(' | ');
+          const visual = [
+            `Semi-realistic cinematic 3D ${shot.shotType?.replace(/_/g, ' ') || 'shot'}.`,
+            shot.facialExpression,
+            shot.bodyLanguage,
+            shot.environment,
+            shot.lighting,
+            shot.cameraDirection,
+          ]
+            .filter(Boolean)
+            .join(' ');
+          shotRows.push({
+            sceneNumber,
+            durationSeconds: Math.max(2, shot.durationSeconds ?? 4),
+            narration: shot.dialogue?.trim() || '',
+            visualDescription: visual,
+            imagePrompt: visual,
+            videoPrompt: visual,
+            cameraMovement: shot.cameraMovement?.trim() || 'static',
+            lighting: shot.lighting?.trim() || 'natural cinematic lighting',
+            environment: shot.environment?.trim() || 'everyday interior',
+            characterConsistencyInstructions:
+              consistency ||
+              'Preserve approved series character identity and wardrobe continuity.',
+          });
+        }
+      }
+    }
+
+    const durationPerScene = Math.max(
+      2,
+      Number((episode.targetDurationSeconds / Math.max(1, episode.scenes.length)).toFixed(2)),
     );
 
     const result = await this.prisma.$transaction(async (tx) => {
@@ -120,7 +199,9 @@ export class SeriesPipelineAdapterService {
         category: 'Series Episode',
         targetDurationSeconds: episode.targetDurationSeconds,
         openingHook: episode.hook ?? episode.script!.slice(0, 160),
-        narrationScript: episode.narrationText ?? episode.script!,
+        narrationScript: dialogueDriven
+          ? episode.script!
+          : episode.narrationText ?? episode.script!,
         closingMessage: episode.ending ?? episode.cliffhanger ?? 'To be continued.',
         description: episode.synopsis ?? episode.title,
         hashtags: ['series', series.slug],
@@ -142,33 +223,37 @@ export class SeriesPipelineAdapterService {
           });
 
       await tx.storyScene.deleteMany({ where: { storyId: story.id } });
-      await tx.storyScene.createMany({
-        data: episode.scenes.map((scene) => {
-          const names = asStringArray(scene.characters);
-          const consistency = names
-            .map((name) => {
-              const note = characterNotesByName.get(name.toLowerCase());
-              return note ? `${name}: ${note}` : name;
-            })
-            .join(' | ');
 
-          return {
-            storyId: story.id,
-            sceneNumber: scene.sceneOrder,
-            durationSeconds: durationPerScene,
-            narration: (scene.narration ?? scene.dialogue ?? '').trim() || scene.action,
-            visualDescription: scene.visualDescription,
-            imagePrompt: scene.visualDescription,
-            videoPrompt: scene.visualDescription,
-            cameraMovement: scene.shotDirection?.trim() || 'Slow cinematic push-in',
-            lighting: scene.emotionalDirection?.trim() || 'Dramatic cinematic lighting',
-            environment: scene.location,
-            characterConsistencyInstructions:
-              consistency ||
-              'Preserve approved series character identity and wardrobe continuity.',
-          };
-        }),
-      });
+      const sceneData =
+        shotRows.length > 0
+          ? shotRows.map((row) => ({ storyId: story.id, ...row }))
+          : episode.scenes.map((scene) => {
+              const names = asStringArray(scene.characters);
+              const consistency = names
+                .map((name) => {
+                  const note = characterNotesByName.get(name.toLowerCase());
+                  return note ? `${name}: ${note}` : name;
+                })
+                .join(' | ');
+
+              return {
+                storyId: story.id,
+                sceneNumber: scene.sceneOrder,
+                durationSeconds: durationPerScene,
+                narration: (scene.narration ?? scene.dialogue ?? '').trim() || scene.action,
+                visualDescription: scene.visualDescription,
+                imagePrompt: scene.visualDescription,
+                videoPrompt: scene.visualDescription,
+                cameraMovement: scene.shotDirection?.trim() || 'Slow cinematic push-in',
+                lighting: scene.emotionalDirection?.trim() || 'Dramatic cinematic lighting',
+                environment: scene.location,
+                characterConsistencyInstructions:
+                  consistency ||
+                  'Preserve approved series character identity and wardrobe continuity.',
+              };
+            });
+
+      await tx.storyScene.createMany({ data: sceneData });
 
       // Replace story characters with projected series roster (preserves series refs via new CVR rows).
       await tx.characterProfile.deleteMany({ where: { storyId: story.id } });
@@ -254,7 +339,8 @@ export class SeriesPipelineAdapterService {
             pipelineAdapter: {
               materializedAt: new Date().toISOString(),
               preserveCharacters: true,
-              sceneCount: episode.scenes.length,
+              dialogueDriven,
+              sceneCount: sceneData.length,
               characterCount: series.characters.length,
             },
           } as Prisma.InputJsonValue,
@@ -264,7 +350,7 @@ export class SeriesPipelineAdapterService {
       return {
         storyId: story.id,
         videoProjectId: videoProject.id,
-        sceneCount: episode.scenes.length,
+        sceneCount: sceneData.length,
         characterCount: series.characters.length,
         reused: false,
       };

@@ -3,6 +3,8 @@ import { GeminiProvider } from './providers/gemini.provider';
 import { FalProvider } from './providers/fal.provider';
 import { KlingProvider } from './providers/kling.provider';
 import { HailuoProvider } from './providers/hailuo.provider';
+import { LipSyncProvider } from './providers/lip-sync.provider';
+import { GeminiTtsProvider } from './providers/gemini-tts.provider';
 import { FacebookProvider } from './providers/facebook.provider';
 import { InstagramProvider } from './providers/instagram.provider';
 import { TikTokProvider } from './providers/tiktok.provider';
@@ -18,6 +20,8 @@ import { VideoProviderRegistry } from './video/video-provider.registry';
     FalProvider,
     KlingProvider,
     HailuoProvider,
+    LipSyncProvider,
+    GeminiTtsProvider,
     VideoProviderRegistry,
     FacebookProvider,
     InstagramProvider,
@@ -31,6 +35,8 @@ import { VideoProviderRegistry } from './video/video-provider.registry';
     FalProvider,
     KlingProvider,
     HailuoProvider,
+    LipSyncProvider,
+    GeminiTtsProvider,
     VideoProviderRegistry,
     FacebookProvider,
     InstagramProvider,

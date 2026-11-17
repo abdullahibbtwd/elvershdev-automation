@@ -14,17 +14,26 @@ import {
   SERIES_DEFAULTS,
   SERIES_NOTIFICATION_TYPES,
   buildCreativeLanguageStyleNotes,
+  buildDialogueEpisodeScriptPrompt,
   buildEpisodeScriptPrompt,
   countSpokenWords,
+  createMockDialogueEpisodeScript,
   createMockEpisodeScript,
+  dialogueEpisodeScriptPlanJsonSchema,
+  dialogueEpisodeScriptPlanSchema,
+  dialoguePlanToEpisodeScriptPlan,
   effectiveEpisodeApprovalRequired,
   episodeScriptPlanJsonSchema,
   episodeScriptPlanSchema,
   estimateGeminiCostUsd,
   getGeminiPricingFromEnv,
+  isDialogueDrivenCreative,
+  normalizeDialogueEpisodeScriptPlanInput,
   normalizeEpisodeScriptPlanInput,
   parseSeriesCreativeSettings,
+  type DialogueEpisodeScriptPlan,
   type EpisodeScriptPlan,
+  type SeriesCreativeSettings,
   type SeriesEpisodePlanningPayload,
 } from '@ai-video/shared';
 import { GeminiProvider } from '../../integrations/providers/gemini.provider';
@@ -32,6 +41,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { QueueService } from '../../queue/queue.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { ContinuityEngineService } from './continuity-engine.service';
+import { DialogueProductionService } from './dialogue-production.service';
 import { SeriesConfigService } from './series-config.service';
 import { SeriesLifecycleHandoffService } from './series-lifecycle-handoff.service';
 
@@ -47,6 +57,7 @@ export class EpisodeDirectorService {
     private readonly notifications: NotificationsService,
     private readonly queues: QueueService,
     private readonly handoff: SeriesLifecycleHandoffService,
+    private readonly dialogueProduction: DialogueProductionService,
   ) {}
 
   async getEpisode(userId: string, seriesId: string, episodeId: string) {
@@ -138,6 +149,8 @@ export class EpisodeDirectorService {
       );
       const meta = (episode.metadata ?? {}) as Record<string, unknown>;
       const config = await this.configService.getOrCreate(userId);
+      const creative = this.resolveCreativeSettings(series, config);
+      const dialogueDriven = isDialogueDrivenCreative(creative);
       const languageStyleNotes = this.buildLanguageStyleNotes(series, config);
 
       const planInput = {
@@ -159,9 +172,19 @@ export class EpisodeDirectorService {
         seriesId,
         episodeId,
         languageStyleNotes,
+        creative,
+        dialogueDriven,
       };
 
-      let plan = await this.generateScriptPlan(planInput);
+      let dialoguePlan: DialogueEpisodeScriptPlan | null = null;
+      let plan: EpisodeScriptPlan;
+      if (dialogueDriven) {
+        dialoguePlan = await this.generateDialogueScriptPlan(planInput);
+        plan = dialoguePlanToEpisodeScriptPlan(dialoguePlan);
+      } else {
+        plan = await this.generateScriptPlan(planInput);
+      }
+
       let validation = await this.continuity.validateEpisode({
         userId,
         seriesId,
@@ -179,7 +202,15 @@ export class EpisodeDirectorService {
         this.logger.warn(
           `Episode ${episode.episodeNumber} continuity failed (${validation.issues.length} issues) — retrying once`,
         );
-        plan = await this.generateScriptPlan({ ...planInput, revisionNotes });
+        if (dialogueDriven) {
+          dialoguePlan = await this.generateDialogueScriptPlan({
+            ...planInput,
+            revisionNotes,
+          });
+          plan = dialoguePlanToEpisodeScriptPlan(dialoguePlan);
+        } else {
+          plan = await this.generateScriptPlan({ ...planInput, revisionNotes });
+        }
         validation = await this.continuity.validateEpisode({
           userId,
           seriesId,
@@ -226,6 +257,14 @@ export class EpisodeDirectorService {
               narration: scene.narration,
               emotionalDirection: scene.emotionalDirection,
               shotDirection: scene.shotDirection,
+              metadata: dialoguePlan
+                ? ({
+                    dialogueDriven: true,
+                    shots:
+                      dialoguePlan.scenes.find((s) => s.sceneNumber === scene.sceneOrder)
+                        ?.shots ?? [],
+                  } as Prisma.InputJsonValue)
+                : undefined,
             },
           });
         }
@@ -237,11 +276,13 @@ export class EpisodeDirectorService {
             synopsis: plan.synopsis,
             hook: plan.hook,
             script: plan.script,
-            narrationText: plan.narrationText,
+            narrationText: dialogueDriven ? plan.narrationText || '' : plan.narrationText,
             ending: plan.ending,
             cliffhanger: plan.cliffhanger || plan.ending,
             nextEpisodeSetup: plan.nextEpisodeSetup,
-            spokenWordCount: plan.spokenWordCount || countSpokenWords(plan.narrationText),
+            spokenWordCount:
+              plan.spokenWordCount ||
+              countSpokenWords(plan.script || plan.narrationText),
             status: autoApprove
               ? SeriesEpisodeStatus.APPROVED
               : SeriesEpisodeStatus.SCRIPT_READY,
@@ -256,6 +297,8 @@ export class EpisodeDirectorService {
               emotionalBeats: plan.emotionalBeats,
               continuityValidation: validation,
               regenerated: options?.regenerate === true,
+              dialogueDriven,
+              dialoguePlan: dialoguePlan ?? undefined,
             },
             lastError: null,
           },
@@ -264,6 +307,15 @@ export class EpisodeDirectorService {
           },
         });
       });
+
+      if (dialoguePlan) {
+        await this.dialogueProduction.materializeDialoguePlan(
+          userId,
+          episodeId,
+          dialoguePlan,
+          { force: true },
+        );
+      }
 
       await this.continuity.persistAfterEpisode({
         seriesId,
@@ -405,6 +457,16 @@ export class EpisodeDirectorService {
     });
   }
 
+  private resolveCreativeSettings(
+    series: { metadata?: unknown },
+    config: { creativeSettings?: unknown },
+  ): SeriesCreativeSettings {
+    const seriesMeta = (series.metadata ?? {}) as Record<string, unknown>;
+    return parseSeriesCreativeSettings(
+      seriesMeta.creativeSettingsSnapshot ?? config.creativeSettings ?? {},
+    );
+  }
+
   private buildLanguageStyleNotes(
     series: {
       metadata?: unknown;
@@ -413,10 +475,7 @@ export class EpisodeDirectorService {
     },
     config: { creativeSettings?: unknown },
   ): string | undefined {
-    const seriesMeta = (series.metadata ?? {}) as Record<string, unknown>;
-    const snapshot = parseSeriesCreativeSettings(
-      seriesMeta.creativeSettingsSnapshot ?? config.creativeSettings ?? {},
-    );
+    const snapshot = this.resolveCreativeSettings(series, config);
     const fromCreative = buildCreativeLanguageStyleNotes(snapshot);
     const extras = [
       series.language ? `Series language: ${series.language}` : null,
@@ -426,6 +485,108 @@ export class EpisodeDirectorService {
       .join('\n');
     const combined = [fromCreative, extras].filter(Boolean).join('\n').trim();
     return combined || undefined;
+  }
+
+  private async generateDialogueScriptPlan(input: {
+    seriesTitle: string;
+    plannedEpisodeCount: number;
+    targetDurationSeconds: number;
+    episodeNumber: number;
+    outlineTitle: string;
+    outlineSynopsis: string | null;
+    outlineHook: string | null;
+    outlineKeyPlot: string | null;
+    outlineCliffhanger: string | null;
+    outlineNextSetup: string | null;
+    context: Awaited<ReturnType<ContinuityEngineService['buildCompactContext']>>;
+    useMockAi?: boolean;
+    userId: string;
+    seriesId: string;
+    episodeId: string;
+    revisionNotes?: string;
+    languageStyleNotes?: string;
+    creative: SeriesCreativeSettings;
+  }): Promise<DialogueEpisodeScriptPlan> {
+    const useMock = input.useMockAi === true || this.gemini.shouldUseMock();
+    if (useMock) {
+      const data = dialogueEpisodeScriptPlanSchema.parse(
+        createMockDialogueEpisodeScript({
+          episodeNumber: input.episodeNumber,
+          title: input.outlineTitle,
+          targetDurationSeconds: input.targetDurationSeconds,
+        }),
+      );
+      await this.prisma.providerUsage.create({
+        data: {
+          userId: input.userId,
+          provider: 'gemini',
+          model: 'mock-gemini',
+          requestType: 'series_dialogue_episode_director',
+          inputTokens: 220,
+          outputTokens: 700,
+          estimatedCost: estimateGeminiCostUsd(220, 700, getGeminiPricingFromEnv()),
+          metadata: { seriesId: input.seriesId, episodeId: input.episodeId },
+        },
+      });
+      return data;
+    }
+
+    const prompt = buildDialogueEpisodeScriptPrompt({
+      seriesTitle: input.seriesTitle,
+      episodeNumber: input.episodeNumber,
+      plannedEpisodeCount: input.plannedEpisodeCount,
+      targetDurationSeconds: input.targetDurationSeconds,
+      outlineTitle: input.outlineTitle,
+      outlineSynopsis: input.outlineSynopsis ?? '',
+      outlineHook: input.outlineHook,
+      outlineKeyPlot: input.outlineKeyPlot,
+      outlineCliffhanger: input.outlineCliffhanger,
+      outlineNextSetup: input.outlineNextSetup,
+      bibleDigest: input.context.bibleDigest,
+      characterDigest: input.context.characterDigest,
+      previousEpisodeSummary: input.context.previousEpisodeSummary,
+      continuityDigest: input.context.continuityDigest,
+      memoryDigest: input.context.memoryDigest,
+      unresolvedMysteries: input.context.unresolvedMysteries,
+      relationshipsDigest: input.context.relationshipsDigest,
+      visualRefsDigest: input.context.visualRefsDigest,
+      revisionNotes: input.revisionNotes,
+      languageStyleNotes: input.languageStyleNotes,
+      creative: input.creative,
+    });
+
+    const result = await this.gemini.generateJson(
+      'series_dialogue_episode_director',
+      prompt,
+      dialogueEpisodeScriptPlanSchema,
+      {
+        responseJsonSchema: dialogueEpisodeScriptPlanJsonSchema as unknown as Record<
+          string,
+          unknown
+        >,
+        normalize: normalizeDialogueEpisodeScriptPlanInput,
+      },
+    );
+
+    await this.prisma.providerUsage.create({
+      data: {
+        userId: input.userId,
+        provider: 'gemini',
+        model: result.usage.model,
+        requestType: 'series_dialogue_episode_director',
+        inputTokens: result.usage.inputTokens,
+        outputTokens: result.usage.outputTokens,
+        estimatedCost: result.usage.estimatedCostUsd,
+        metadata: { seriesId: input.seriesId, episodeId: input.episodeId },
+      },
+    });
+
+    return {
+      ...result.data,
+      episodeNumber: input.episodeNumber,
+      spokenWordCount:
+        result.data.spokenWordCount || countSpokenWords(result.data.script),
+    };
   }
 
   private async generateScriptPlan(input: {

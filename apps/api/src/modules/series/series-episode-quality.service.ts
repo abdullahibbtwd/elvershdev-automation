@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Prisma, VideoRenderStatus } from '@prisma/client';
 import { SERIES_DEFAULTS } from '@ai-video/shared';
 import { PrismaService } from '../../prisma/prisma.service';
+import { DialogueProductionService } from './dialogue-production.service';
 import { SeriesConfigService } from './series-config.service';
 
 export type SeriesEpisodeQualityResult = {
@@ -24,6 +25,7 @@ export class SeriesEpisodeQualityService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly configService: SeriesConfigService,
+    private readonly dialogueProduction: DialogueProductionService,
   ) {}
 
   async evaluateRenderedEpisode(
@@ -127,6 +129,22 @@ export class SeriesEpisodeQualityService {
           passed: true,
           hard: false,
           detail: 'Duration not available — skipped',
+        });
+      }
+    }
+
+    const dialogueMeta = (episode.metadata as Record<string, unknown> | null) ?? {};
+    if (dialogueMeta.dialogueDriven === true) {
+      const dialogueQuality = await this.dialogueProduction.evaluateDialogueQuality(
+        userId,
+        episodeId,
+      );
+      for (const check of dialogueQuality.checks) {
+        checks.push({
+          id: `dialogue_${check.id}`,
+          passed: check.passed,
+          hard: check.hard,
+          detail: check.detail,
         });
       }
     }
