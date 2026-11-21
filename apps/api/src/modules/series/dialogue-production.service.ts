@@ -11,11 +11,12 @@ import {
   Prisma,
 } from '@prisma/client';
 import {
+  SERIES_DIALOGUE_CREATIVE_DEFAULTS,
   classifyShotProductionMethod,
   estimateDialogueEpisodeCost,
   flattenDialogueLines,
   getLipSyncCapabilities,
-  isDialogueDrivenCreative,
+  mergeSeriesCreativeSettings,
   parseSeriesCreativeSettings,
   resolveLipSyncProviderId,
   resolveSeriesCostMode,
@@ -27,7 +28,6 @@ import { LipSyncProvider } from '../../integrations/providers/lip-sync.provider'
 import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../../storage/storage.service';
 import { CharacterVoiceService } from './character-voice.service';
-import { SeriesConfigService } from './series-config.service';
 
 @Injectable()
 export class DialogueProductionService {
@@ -39,30 +39,14 @@ export class DialogueProductionService {
     private readonly lipSync: LipSyncProvider,
     private readonly tts: GeminiTtsProvider,
     private readonly storage: StorageService,
-    private readonly configService: SeriesConfigService,
   ) {}
 
-  async isDialogueDrivenForEpisode(userId: string, seriesId: string): Promise<boolean> {
-    const series = await this.prisma.storySeries.findFirst({
-      where: { id: seriesId, userId },
-      select: { metadata: true, laneId: true },
-    });
-    if (!series) return false;
-    const config = await this.configService.getOrCreate(userId);
-    const lane = series.laneId
-      ? await this.prisma.seriesLane.findFirst({
-          where: { id: series.laneId, userId },
-          select: { creativeSettings: true },
-        })
-      : null;
-    const seriesMeta = (series.metadata ?? {}) as Record<string, unknown>;
-    const settings = parseSeriesCreativeSettings(
-      seriesMeta.creativeSettingsSnapshot ??
-        lane?.creativeSettings ??
-        config.creativeSettings ??
-        {},
-    );
-    return isDialogueDrivenCreative(settings);
+  /**
+   * Series Studio episode production is always Grok dialogue (all lane types).
+   * Legacy fal VISUAL_INTELLIGENCE / Hailuo path is not used.
+   */
+  async isDialogueDrivenForEpisode(_userId: string, _seriesId: string): Promise<boolean> {
+    return true;
   }
 
   /**
@@ -98,10 +82,13 @@ export class DialogueProductionService {
       select: { creativeSettings: true },
     });
     const seriesMeta = (episode.series as { metadata?: unknown }).metadata;
-    const creative = parseSeriesCreativeSettings(
-      ((seriesMeta as Record<string, unknown> | null)?.creativeSettingsSnapshot as unknown) ??
-        lane?.creativeSettings ??
-        {},
+    const creative = mergeSeriesCreativeSettings(
+      SERIES_DIALOGUE_CREATIVE_DEFAULTS,
+      parseSeriesCreativeSettings(
+        ((seriesMeta as Record<string, unknown> | null)?.creativeSettingsSnapshot as unknown) ??
+          {},
+      ),
+      parseSeriesCreativeSettings(lane?.creativeSettings),
     );
     const costMode = resolveSeriesCostMode(creative.costMode);
 
@@ -171,7 +158,8 @@ export class DialogueProductionService {
           cursorMs += Math.round(shot.durationSeconds * 1000);
         }
 
-        const requiresLipSync = hasDialogue ? true : Boolean(shot.requiresLipSync);
+        // Grok T2V embeds speech — do not mark shots for separate lip-sync jobs.
+        const requiresLipSync = false;
         const productionMethod = classifyShotProductionMethod(
           {
             shotType: shot.shotType,
@@ -215,6 +203,7 @@ export class DialogueProductionService {
             metadata: {
               ambientSound: shot.ambientSound,
               musicDirection: shot.musicDirection,
+              keyProps: shot.keyProps ?? [],
               productionMethod,
               costMode,
             } as Prisma.InputJsonValue,
@@ -734,9 +723,9 @@ export class DialogueProductionService {
       where: { id: episodeId, series: { userId } },
       include: {
         dialogueLines: true,
-        shots: true,
-        lipSyncJobs: true,
-        series: { include: { characters: { include: { characterVoice: true } } } },
+        videoClips: {
+          select: { id: true, status: true, durationSeconds: true },
+        },
       },
     });
     if (!episode) {
@@ -754,6 +743,13 @@ export class DialogueProductionService {
       return { passed: true, checks: [{ id: 'dialogue_mode', passed: true, detail: 'not dialogue-driven' }] };
     }
 
+    // Grok Lite cinematic path: native T2V audio/lips — no separate TTS / fal / lip-sync jobs.
+    checks.push({
+      id: 'pipeline',
+      passed: true,
+      detail: 'Grok text-to-video (no fal stills / TTS / lip-sync gate)',
+    });
+
     const speakingLines = episode.dialogueLines.filter((l) => l.text.trim());
     checks.push({
       id: 'dialogue_lines_have_speakers',
@@ -762,7 +758,9 @@ export class DialogueProductionService {
       detail: `${speakingLines.length} speaking lines`,
     });
 
-    const speakers = new Set(speakingLines.map((l) => l.speakerName.toLowerCase()));
+    const speakers = new Set(
+      speakingLines.map((l) => (l.speakerName ?? '').toLowerCase()).filter(Boolean),
+    );
     checks.push({
       id: 'min_two_speakers',
       passed: speakers.size >= 2,
@@ -770,54 +768,50 @@ export class DialogueProductionService {
       detail: `${speakers.size} speakers`,
     });
 
-    const voicesAssigned = episode.series.characters.every(
-      (c) => !speakingLines.some((l) => l.speakerName.toLowerCase() === c.name.toLowerCase()) ||
-        Boolean(c.characterVoice),
-    );
+    const completedClips = episode.videoClips.filter((c) => c.status === 'COMPLETED');
+    const hasClipPlan = episode.videoClips.length > 0;
     checks.push({
-      id: 'voices_assigned',
-      passed: voicesAssigned,
+      id: 'grok_clips',
+      passed: !hasClipPlan || completedClips.length === episode.videoClips.length,
       hard: true,
-      detail: voicesAssigned ? 'All speaking characters have voices' : 'Missing character voices',
+      detail: hasClipPlan
+        ? `${completedClips.length}/${episode.videoClips.length} Grok clips completed`
+        : 'Clip plan not required for this check',
     });
 
-    const audioReady = speakingLines.every(
-      (l) => l.audioMediaAssetId || l.status === DialogueLineStatus.AUDIO_READY || l.status === DialogueLineStatus.LIP_SYNC_READY,
+    // Soft: assembled duration vs episode target (Grok clip packs are ±1–2s; allow wide slack).
+    const assemblyMeta =
+      meta.assembly && typeof meta.assembly === 'object'
+        ? (meta.assembly as Record<string, unknown>)
+        : null;
+    const clipSum = completedClips.reduce(
+      (sum, c) => sum + (typeof c.durationSeconds === 'number' ? c.durationSeconds : 0),
+      0,
     );
-    checks.push({
-      id: 'dialogue_audio_exists',
-      passed: audioReady || speakingLines.every((l) => l.status !== DialogueLineStatus.FAILED),
-      hard: true,
-      detail: `Audio status for ${speakingLines.length} lines`,
-    });
-
-    const requiredLipSync = episode.shots.filter((s) => s.requiresLipSync);
-    const lipSyncDone = requiredLipSync.every((s) =>
-      episode.lipSyncJobs.some(
-        (j) =>
-          j.episodeShotId === s.id &&
-          j.status === LipSyncJobStatus.COMPLETED &&
-          // Real-provider gate: mock jobs fail hard check unless explicitly allowed.
-          (j.mocked === false || process.env.LIP_SYNC_USE_MOCK === 'true'),
-      ),
-    );
-    checks.push({
-      id: 'lip_sync_required',
-      passed: requiredLipSync.length === 0 || lipSyncDone,
-      hard: true,
-      detail: `${requiredLipSync.length} lip-sync shots`,
-    });
-
-    const duration = episode.actualDurationSeconds;
+    const duration =
+      typeof episode.actualDurationSeconds === 'number' && episode.actualDurationSeconds >= 10
+        ? episode.actualDurationSeconds
+        : typeof assemblyMeta?.durationSeconds === 'number'
+          ? (assemblyMeta.durationSeconds as number)
+          : clipSum > 0
+            ? clipSum
+            : typeof episode.actualDurationSeconds === 'number'
+              ? episode.actualDurationSeconds
+              : null;
     const target = episode.targetDurationSeconds || 60;
+    const minDuration = Math.max(3, target * 0.4);
+    const maxDuration = Math.max(target + 20, target * 1.75);
     const durationOk =
       typeof duration !== 'number' ||
-      (duration >= Math.min(40, target * 0.6) && duration <= Math.max(60, target * 1.25));
+      (duration >= minDuration && duration <= maxDuration);
     checks.push({
       id: 'duration_range',
       passed: durationOk,
       hard: false,
-      detail: duration != null ? `${duration}s (target ${target}s)` : 'duration pending',
+      detail:
+        duration != null
+          ? `${duration}s (target ${target}s, allow ${minDuration.toFixed(0)}–${maxDuration.toFixed(0)}s)`
+          : 'duration pending',
     });
 
     const hardFailed = checks.some((c) => c.hard && !c.passed);

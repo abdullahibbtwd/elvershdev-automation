@@ -27,25 +27,92 @@ export const DIALOGUE_EMOTIONS = [
   'neutral',
 ] as const;
 
+function nonEmptyStrings(value: unknown, fallback: string[] = []): string[] {
+  if (!Array.isArray(value)) return fallback;
+  const cleaned = value
+    .map((v) => (typeof v === 'string' ? v.trim() : v == null ? '' : String(v).trim()))
+    .filter(Boolean);
+  return cleaned.length ? cleaned : fallback;
+}
+
+function filterNamedPairs(
+  value: unknown,
+  leftKey: string,
+  rightKey: string,
+): Array<Record<string, string>> {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => {
+      const row = (item && typeof item === 'object' ? item : {}) as Record<string, unknown>;
+      const left = typeof row[leftKey] === 'string' ? row[leftKey].trim() : '';
+      const right = typeof row[rightKey] === 'string' ? row[rightKey].trim() : '';
+      return left && right ? { [leftKey]: left, [rightKey]: right } : null;
+    })
+    .filter(Boolean) as Array<Record<string, string>>;
+}
+
+function filterRelationshipPairs(
+  value: unknown,
+): Array<{ between: string[]; change: string }> {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => {
+      const row = (item && typeof item === 'object' ? item : {}) as Record<string, unknown>;
+      const between = nonEmptyStrings(row.between).slice(0, 2);
+      const change = typeof row.change === 'string' ? row.change.trim() : '';
+      return between.length >= 2 && change ? { between, change } : null;
+    })
+    .filter(Boolean) as Array<{ between: string[]; change: string }>;
+}
+
+function filterKnowledgePairs(
+  value: unknown,
+): Array<{ character: string; learned: string[] }> {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => {
+      const row = (item && typeof item === 'object' ? item : {}) as Record<string, unknown>;
+      const character = typeof row.character === 'string' ? row.character.trim() : '';
+      const learned = nonEmptyStrings(row.learned);
+      return character ? { character, learned } : null;
+    })
+    .filter(Boolean) as Array<{ character: string; learned: string[] }>;
+}
+
 export const dialogueShotPlanSchema = z.object({
   shotOrder: z.number().int().min(1),
   shotType: z.enum(DIALOGUE_SHOT_TYPES).default('medium_close_up'),
-  speaker: z.string().min(1).max(100),
+  /**
+   * Speaking character for dialogue shots.
+   * May be empty for pure reaction / listening / insert shots (no spoken line).
+   */
+  speaker: z.string().max(100).default(''),
   /** Empty for pure reaction / listening shots. */
   dialogue: z.string().max(2000).default(''),
   listeners: z.array(z.string().min(1).max(100)).max(8).default([]),
-  emotion: z.string().min(1).max(120),
-  facialExpression: z.string().min(1).max(300),
-  bodyLanguage: z.string().min(1).max(300),
-  cameraDirection: z.string().min(1).max(300),
+  emotion: z.string().min(1).max(120).default('neutral'),
+  facialExpression: z.string().min(1).max(300).default('natural expression'),
+  bodyLanguage: z.string().min(1).max(300).default('natural posture'),
+  cameraDirection: z.string().min(1).max(300).default('medium close-up'),
   cameraMovement: z.string().max(200).optional().default('static'),
-  charactersVisible: z.array(z.string().min(1).max(100)).min(1).max(8),
-  environment: z.string().min(1).max(500),
+  charactersVisible: z.preprocess(
+    (value) => nonEmptyStrings(value, ['Character']),
+    z.array(z.string().min(1).max(100)).min(1).max(8),
+  ),
+  environment: z.string().min(1).max(500).default('indoor scene'),
   lighting: z.string().max(300).optional().default('natural cinematic lighting'),
-  durationSeconds: z.number().min(1).max(30),
+  durationSeconds: z.number().min(1).max(30).default(4),
   requiresLipSync: z.boolean().default(true),
   ambientSound: z.string().max(300).optional().default(''),
   musicDirection: z.string().max(300).optional().default(''),
+  /**
+   * Physical story objects that MUST be visible in this shot
+   * (phone, ring, letter, keys, gift, photo, etc.). Empty only when none matter.
+   */
+  keyProps: z
+    .preprocess((value) => nonEmptyStrings(value), z.array(z.string().min(1).max(80)).max(12))
+    .optional()
+    .default([]),
 });
 
 export type DialogueShotPlan = z.infer<typeof dialogueShotPlanSchema>;
@@ -88,33 +155,44 @@ export const dialogueEpisodeScriptPlanSchema = z.object({
   narrationText: z.string().default(''),
   scenes: z.array(dialogueScenePlanSchema).min(2).max(10),
   continuityChanges: z.object({
-    characterStateUpdates: z
-      .array(z.object({ character: z.string().min(1), change: z.string().min(1) }))
-      .default([]),
-    relationshipUpdates: z
-      .array(
+    characterStateUpdates: z.preprocess(
+      (value) => filterNamedPairs(value, 'character', 'change'),
+      z.array(z.object({ character: z.string().min(1), change: z.string().min(1) })),
+    ),
+    relationshipUpdates: z.preprocess(
+      (value) => filterRelationshipPairs(value),
+      z.array(
         z.object({
           between: z.array(z.string().min(1)).min(2).max(2),
           change: z.string().min(1),
         }),
-      )
-      .default([]),
-    locationUpdates: z
-      .array(z.object({ character: z.string().min(1), location: z.string().min(1) }))
-      .default([]),
-    objectOwnershipUpdates: z
-      .array(z.object({ object: z.string().min(1), owner: z.string().min(1) }))
-      .default([]),
-    newMysteries: z.array(z.string().min(1)).default([]),
-    resolvedMysteries: z.array(z.string().min(1)).default([]),
-    knowledgeUpdates: z
-      .array(
+      ),
+    ),
+    locationUpdates: z.preprocess(
+      (value) => filterNamedPairs(value, 'character', 'location'),
+      z.array(z.object({ character: z.string().min(1), location: z.string().min(1) })),
+    ),
+    objectOwnershipUpdates: z.preprocess(
+      (value) => filterNamedPairs(value, 'object', 'owner'),
+      z.array(z.object({ object: z.string().min(1), owner: z.string().min(1) })),
+    ),
+    newMysteries: z.preprocess(
+      (value) => nonEmptyStrings(value),
+      z.array(z.string().min(1)),
+    ),
+    resolvedMysteries: z.preprocess(
+      (value) => nonEmptyStrings(value),
+      z.array(z.string().min(1)),
+    ),
+    knowledgeUpdates: z.preprocess(
+      (value) => filterKnowledgePairs(value),
+      z.array(
         z.object({
           character: z.string().min(1),
           learned: z.array(z.string().min(1)).default([]),
         }),
-      )
-      .default([]),
+      ),
+    ),
   }),
   memoryEvents: z
     .array(

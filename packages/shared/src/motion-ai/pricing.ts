@@ -76,6 +76,49 @@ export function estimateHailuoVideoCostUsd(
   return Number((duration * perSecond).toFixed(6));
 }
 
+export interface XaiVideoPricingConfig {
+  pricePerSecond480PUsd: number;
+  pricePerSecond720PUsd: number;
+  pricePerSecond1080PUsd: number;
+  currency: string;
+}
+
+export function getXaiVideoPricingFromEnv(
+  env: Record<string, string | undefined> = readProcessEnv(),
+): XaiVideoPricingConfig {
+  const parse = (raw: string | undefined, fallback: number) => {
+    const value = Number.parseFloat(raw ?? String(fallback));
+    return Number.isFinite(value) ? value : fallback;
+  };
+  return {
+    // Official docs.x.ai pricing for grok-imagine-video-1.5-lite
+    pricePerSecond480PUsd: parse(env.XAI_VIDEO_PRICE_PER_SECOND_480P_USD, 0.02),
+    pricePerSecond720PUsd: parse(env.XAI_VIDEO_PRICE_PER_SECOND_720P_USD, 0.03),
+    pricePerSecond1080PUsd: parse(env.XAI_VIDEO_PRICE_PER_SECOND_1080P_USD, 0.14),
+    currency: env.XAI_VIDEO_CURRENCY ?? 'USD',
+  };
+}
+
+/**
+ * Estimated xAI Grok Imagine Video 1.5 Lite cost — official published per-second rates by resolution.
+ * 720p default: $0.03/sec.
+ */
+export function estimateXaiVideoCostUsd(
+  durationSeconds: number,
+  resolution: string = '720p',
+  pricing: XaiVideoPricingConfig = getXaiVideoPricingFromEnv(),
+): number {
+  const duration = Math.max(0, durationSeconds);
+  const normalized = String(resolution || '720p').trim().toLowerCase();
+  const perSecond =
+    normalized === '480p' || normalized === '480'
+      ? pricing.pricePerSecond480PUsd
+      : normalized === '1080p' || normalized === '1080'
+        ? pricing.pricePerSecond1080PUsd
+        : pricing.pricePerSecond720PUsd;
+  return Number((duration * perSecond).toFixed(6));
+}
+
 export function estimateVideoGenerationCostUsd(
   provider: string,
   durationSeconds: number,
@@ -85,6 +128,9 @@ export function estimateVideoGenerationCostUsd(
   const normalized = (provider || '').toLowerCase();
   if (normalized === 'hailuo') {
     return estimateHailuoVideoCostUsd(durationSeconds, resolution, getHailuoPricingFromEnv(env));
+  }
+  if (normalized === 'xai' || normalized === 'grok') {
+    return estimateXaiVideoCostUsd(durationSeconds, resolution, getXaiVideoPricingFromEnv(env));
   }
   return estimateKlingVideoCostUsd(durationSeconds, resolution, getKlingPricingFromEnv(env));
 }

@@ -7,7 +7,13 @@ import { LoadingState } from '@/components/LoadingState';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { ChoiceGroup } from '@/components/ui/choice-group';
+import { FormField } from '@/components/ui/form-field';
 import { Input } from '@/components/ui/input';
+import { Select } from '@/components/ui/select';
+import { SettingsSection } from '@/components/ui/settings-section';
+import { Switch } from '@/components/ui/switch';
+import { Textarea } from '@/components/ui/textarea';
 import {
   SERIES_GENRE_OPTIONS,
   SERIES_THEME_OPTIONS,
@@ -20,6 +26,22 @@ import { statusTone } from '@/lib/status';
 
 const PLATFORMS = ['FACEBOOK', 'INSTAGRAM', 'TIKTOK', 'YOUTUBE'] as const;
 
+type SettingsTab = 'studio' | 'automation' | 'production' | 'creative' | 'lanes';
+
+type LaneDraft = {
+  name: string;
+  publishTime: string;
+  timezone: string;
+  productionLeadTimeMinutes: string;
+  preferredProductionTime: string;
+  productionStartMode: string;
+  plannedEpisodeCount: string;
+  targetEpisodeDurationSeconds: string;
+  targetStoryDurationSeconds: string;
+  maxClipDurationSeconds: string;
+  replacementTriggerEpisode: string;
+};
+
 const CORE_TOGGLES: Array<{ key: keyof SeriesConfig; label: string; hint?: string }> = [
   { key: 'seriesStudioEnabled', label: 'Series Studio enabled' },
   { key: 'morningLaneEnabled', label: 'Morning lane enabled' },
@@ -29,22 +51,22 @@ const CORE_TOGGLES: Array<{ key: keyof SeriesConfig; label: string; hint?: strin
 const MASTER_TOGGLES: Array<{ key: keyof SeriesConfig; label: string; hint?: string }> = [
   {
     key: 'automaticEpisodeProduction',
-    label: 'Automatic Episode Production',
-    hint: 'Master switch for scripts + media. Individual advanced stages must also be on.',
+    label: 'Automatic episode production',
+    hint: 'Scripts + media. Individual advanced stages must also be on.',
   },
   {
     key: 'automaticMoviePlanning',
-    label: 'Automatic Movie Planning',
-    hint: 'Plans new movies when a lane needs one. Manual Plan Movie always available.',
+    label: 'Automatic movie planning',
+    hint: 'Plans a new movie when a lane needs one. Manual Plan Movie always works.',
   },
   {
     key: 'automaticPublishing',
-    label: 'Automatic Publishing',
-    hint: 'Hands completed episodes to the publish pipeline at the configured publish time.',
+    label: 'Automatic publishing',
+    hint: 'Publishes completed episodes at the lane publish time.',
   },
   {
     key: 'automaticReplacementPlanning',
-    label: 'Automatic Replacement Planning',
+    label: 'Automatic replacement planning',
     hint: 'Prepares the next movie before the current one ends.',
   },
 ];
@@ -63,7 +85,7 @@ const APPROVAL_TOGGLES: Array<{ key: keyof SeriesConfig; label: string; hint?: s
   {
     key: 'automaticReplacementApproval',
     label: 'Automatic replacement approval',
-    hint: 'Default OFF — keep a human gate for replacement movies.',
+    hint: 'Default off — keep a human gate for replacement movies.',
   },
 ];
 
@@ -73,19 +95,19 @@ const ADVANCED_STAGE_TOGGLES: Array<{ key: keyof SeriesConfig; label: string; hi
   {
     key: 'automaticVisualGeneration',
     label: 'Automatic visuals',
-    hint: 'If off while production master is on, production stops before visuals.',
+    hint: 'If off while production is on, runs stop before visuals.',
   },
   {
     key: 'automaticMotionGeneration',
     label: 'Automatic motion',
-    hint: 'If off, automatic production stops before motion (does not skip silently).',
+    hint: 'If off, runs stop before motion (nothing is skipped silently).',
   },
   { key: 'automaticNarration', label: 'Automatic narration' },
   { key: 'automaticRendering', label: 'Automatic rendering' },
   {
     key: 'startMediaAfterMoviePlanning',
     label: 'Start media after movie planning',
-    hint: 'Default OFF — Plan Movies in Advance keeps planning separate from credits spend.',
+    hint: 'Default off — keeps planning separate from credit spend.',
   },
 ];
 
@@ -96,33 +118,54 @@ const ALL_TOGGLE_KEYS = [
   ...ADVANCED_STAGE_TOGGLES,
 ].map((t) => t.key);
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="space-y-1">
-      <label className="text-sm font-medium">{label}</label>
-      {children}
-    </div>
-  );
+const STORY_DURATION_PRESETS = [
+  { value: '', label: 'Legacy (count × episode)' },
+  { value: '300', label: '5 min' },
+  { value: '600', label: '10 min' },
+  { value: '900', label: '15 min' },
+  { value: '1200', label: '20 min' },
+  { value: '1800', label: '30 min' },
+];
+
+const TIMEZONE_OPTIONS = [
+  { value: 'Africa/Lagos', label: 'Africa/Lagos' },
+  { value: 'UTC', label: 'UTC' },
+  { value: 'America/New_York', label: 'America/New_York' },
+  { value: 'Europe/London', label: 'Europe/London' },
+  { value: 'Asia/Dubai', label: 'Asia/Dubai' },
+];
+
+const START_MODE_OPTIONS = [
+  { value: 'IMMEDIATE', label: 'Immediately after approval' },
+  { value: 'NEXT_WINDOW', label: 'At next scheduled window' },
+  { value: 'CUSTOM', label: 'Custom date and time' },
+  { value: 'MANUAL', label: 'Manual start only' },
+];
+
+function emptyLaneDraft(lane: SeriesLane): LaneDraft {
+  return {
+    name: lane.name,
+    publishTime: lane.publishTime,
+    timezone: lane.timezone,
+    productionLeadTimeMinutes: String(lane.productionLeadTimeMinutes ?? 240),
+    preferredProductionTime: lane.preferredProductionTime ?? '',
+    productionStartMode: lane.productionStartMode ?? 'NEXT_WINDOW',
+    plannedEpisodeCount: String(lane.plannedEpisodeCount ?? 10),
+    targetEpisodeDurationSeconds: String(lane.targetEpisodeDurationSeconds ?? 60),
+    targetStoryDurationSeconds:
+      lane.targetStoryDurationSeconds == null ? '' : String(lane.targetStoryDurationSeconds),
+    maxClipDurationSeconds: String(lane.maxClipDurationSeconds ?? 15),
+    replacementTriggerEpisode: String(lane.replacementTriggerEpisode ?? 8),
+  };
 }
 
 export function SeriesSettingsPage() {
   const queryClient = useQueryClient();
+  const [tab, setTab] = useState<SettingsTab>('studio');
   const [toggles, setToggles] = useState<Partial<Record<keyof SeriesConfig, boolean>>>({});
   const [form, setForm] = useState<Record<string, string>>({});
   const [channels, setChannels] = useState<Record<string, boolean>>({});
-  const [laneDrafts, setLaneDrafts] = useState<
-    Record<
-      string,
-      {
-        name: string;
-        publishTime: string;
-        timezone: string;
-        productionLeadTimeMinutes: string;
-        preferredProductionTime: string;
-        productionStartMode: string;
-      }
-    >
-  >({});
+  const [laneDrafts, setLaneDrafts] = useState<Record<string, LaneDraft>>({});
   const [creative, setCreative] = useState<SeriesCreativeSettings>({});
   const [laneCreativeId, setLaneCreativeId] = useState('');
   const [laneCreative, setLaneCreative] = useState<SeriesCreativeSettings>({});
@@ -150,6 +193,10 @@ export function SeriesSettingsPage() {
     setForm({
       defaultPlannedEpisodeCount: String(data.defaultPlannedEpisodeCount ?? 10),
       defaultEpisodeDurationSeconds: String(data.defaultEpisodeDurationSeconds ?? 60),
+      defaultStoryDurationSeconds:
+        data.defaultStoryDurationSeconds == null ? '' : String(data.defaultStoryDurationSeconds),
+      defaultMaxClipDurationSeconds: String(data.defaultMaxClipDurationSeconds ?? 15),
+      defaultProductionFormat: data.defaultProductionFormat ?? 'episodic',
       defaultReplacementTriggerEpisode: String(data.defaultReplacementTriggerEpisode ?? 8),
       maxConcurrentEpisodeProduction: String(data.maxConcurrentEpisodeProduction ?? 1),
       maxRetries: String(data.maxRetries ?? 3),
@@ -178,26 +225,21 @@ export function SeriesSettingsPage() {
   useEffect(() => {
     const lanes = lanesQuery.data;
     if (!lanes) return;
-    setLaneDrafts(
-      Object.fromEntries(
-        lanes.map((lane) => [
-          lane.id,
-          {
-            name: lane.name,
-            publishTime: lane.publishTime,
-            timezone: lane.timezone,
-            productionLeadTimeMinutes: String(lane.productionLeadTimeMinutes ?? 240),
-            preferredProductionTime: lane.preferredProductionTime ?? '',
-            productionStartMode: lane.productionStartMode ?? 'NEXT_WINDOW',
-          },
-        ]),
-      ),
-    );
+    setLaneDrafts(Object.fromEntries(lanes.map((lane) => [lane.id, emptyLaneDraft(lane)])));
     if (!laneCreativeId && lanes[0]) {
       setLaneCreativeId(lanes[0].id);
       setLaneCreative(lanes[0].creativeSettings ?? {});
     }
   }, [lanesQuery.data, laneCreativeId]);
+
+  const setToggle = (key: keyof SeriesConfig, value: boolean) =>
+    setToggles((prev) => ({ ...prev, [key]: value }));
+
+  const patchLaneDraft = (lane: SeriesLane, patch: Partial<LaneDraft>) =>
+    setLaneDrafts((prev) => ({
+      ...prev,
+      [lane.id]: { ...(prev[lane.id] ?? emptyLaneDraft(lane)), ...patch },
+    }));
 
   const saveConfig = useMutation({
     mutationFn: async () => {
@@ -216,6 +258,11 @@ export function SeriesSettingsPage() {
         autonomyMode,
         defaultPlannedEpisodeCount: num('defaultPlannedEpisodeCount'),
         defaultEpisodeDurationSeconds: num('defaultEpisodeDurationSeconds'),
+        defaultStoryDurationSeconds: nullableNum('defaultStoryDurationSeconds') as number | null,
+        defaultMaxClipDurationSeconds: num('defaultMaxClipDurationSeconds'),
+        defaultProductionFormat: (form.defaultProductionFormat === 'standalone'
+          ? 'standalone'
+          : 'episodic') as 'episodic' | 'standalone',
         defaultReplacementTriggerEpisode: num('defaultReplacementTriggerEpisode'),
         maxConcurrentEpisodeProduction: num('maxConcurrentEpisodeProduction'),
         maxRetries: num('maxRetries'),
@@ -230,7 +277,15 @@ export function SeriesSettingsPage() {
         monthlyBudgetUsd: nullableNum('monthlyBudgetUsd') as number | null,
         maxCostPerEpisodeUsd: nullableNum('maxCostPerEpisodeUsd') as number | null,
         channelPublishingEnabled: channels,
-        creativeSettings: creative,
+        creativeSettings: {
+          ...creative,
+          episodeDurationSeconds: num('defaultEpisodeDurationSeconds'),
+          storyDurationSeconds: nullableNum('defaultStoryDurationSeconds') ?? undefined,
+          maxClipDurationSeconds: num('defaultMaxClipDurationSeconds'),
+          productionFormat:
+            form.defaultProductionFormat === 'standalone' ? 'standalone' : 'episodic',
+          episodesPerMovie: num('defaultPlannedEpisodeCount'),
+        },
       } as Partial<SeriesConfig>);
     },
     onSuccess: () => {
@@ -248,6 +303,12 @@ export function SeriesSettingsPage() {
   const saveLane = useMutation({
     mutationFn: async (lane: SeriesLane) => {
       const draft = laneDrafts[lane.id];
+      const plannedEpisodeCount = draft?.plannedEpisodeCount
+        ? Number(draft.plannedEpisodeCount)
+        : undefined;
+      const replacementTriggerEpisode = draft?.replacementTriggerEpisode
+        ? Number(draft.replacementTriggerEpisode)
+        : undefined;
       return seriesApi.updateLane(lane.id, {
         name: draft?.name,
         publishTime: draft?.publishTime,
@@ -257,26 +318,47 @@ export function SeriesSettingsPage() {
           : undefined,
         preferredProductionTime: draft?.preferredProductionTime?.trim() || null,
         productionStartMode: draft?.productionStartMode || undefined,
-        ...(lane.id === laneCreativeId ? { creativeSettings: laneCreative } : {}),
+        plannedEpisodeCount,
+        targetEpisodeDurationSeconds: draft?.targetEpisodeDurationSeconds
+          ? Number(draft.targetEpisodeDurationSeconds)
+          : undefined,
+        targetStoryDurationSeconds: draft?.targetStoryDurationSeconds?.trim()
+          ? Number(draft.targetStoryDurationSeconds)
+          : null,
+        maxClipDurationSeconds: draft?.maxClipDurationSeconds
+          ? Number(draft.maxClipDurationSeconds)
+          : undefined,
+        replacementTriggerEpisode,
+        ...(lane.id === laneCreativeId
+          ? {
+              creativeSettings: {
+                ...laneCreative,
+                // Series Studio is Grok-only for all lanes — never persist fal/narration mode.
+                dialogueDrivenStorytelling: true,
+                narrationPreference: laneCreative.narrationPreference ?? 'avoid',
+                aspectRatio: '9:16',
+                visualStyle:
+                  laneCreative.visualStyle?.trim() ||
+                  'Stylized cinematic 3D cartoon animation (Pixar/DreamWorks-like). Expressive cartoon faces, clean readable designs, consistent character model sheets. NOT photorealistic live-action humans.',
+              },
+            }
+          : {}),
       });
     },
     onSuccess: (_, lane) => {
       toast.success(`${lane.name} saved`);
       void queryClient.invalidateQueries({ queryKey: ['series', 'lanes'] });
     },
-    onError: () => toast.error('Failed to save lane'),
+    onError: (err: unknown) => {
+      const message =
+        (err as { response?: { data?: { error?: { message?: string }; message?: string } } })
+          ?.response?.data?.error?.message ||
+        (err as { response?: { data?: { message?: string } } })?.response?.data?.message ||
+        (err as Error)?.message ||
+        'Failed to save lane';
+      toast.error(String(message));
+    },
   });
-
-  const toggleList = (
-    list: string[] | undefined,
-    value: string,
-    setter: (next: string[]) => void,
-  ) => {
-    const current = list ?? [];
-    setter(
-      current.includes(value) ? current.filter((v) => v !== value) : [...current, value],
-    );
-  };
 
   if (configQuery.isLoading || lanesQuery.isLoading) return <LoadingState />;
   if (configQuery.error || !configQuery.data) {
@@ -288,11 +370,20 @@ export function SeriesSettingsPage() {
     );
   }
 
+  const config = configQuery.data;
+  const lanes = lanesQuery.data ?? [];
+  const stageWarning =
+    toggles.automaticEpisodeProduction &&
+    (!toggles.automaticVisualGeneration ||
+      !toggles.automaticMotionGeneration ||
+      !toggles.automaticNarration ||
+      !toggles.automaticRendering);
+
   return (
     <div className="space-y-6">
       <PageHeader
         title="Series settings"
-        description="Feature switches, budgets, and lane publish times. Every toggle persists through the Series API."
+        description="Turn the studio on, set how it runs, then tune production and creative defaults."
         actions={
           <Link
             to="/series"
@@ -304,445 +395,449 @@ export function SeriesSettingsPage() {
       />
 
       <div className="flex flex-wrap items-center gap-2">
-        <Badge tone={statusTone(configQuery.data.runMode)}>{configQuery.data.runMode}</Badge>
-        <Badge tone={configQuery.data.seriesStudioEnabled ? 'success' : 'warning'}>
-          {configQuery.data.seriesStudioEnabled ? 'Studio on' : 'Studio off'}
+        <Badge tone={statusTone(config.runMode)}>{config.runMode}</Badge>
+        <Badge tone={config.seriesStudioEnabled ? 'success' : 'warning'}>
+          {config.seriesStudioEnabled ? 'Studio on' : 'Studio off'}
         </Badge>
         <Badge tone={autonomyMode === 'FULLY_AUTONOMOUS' ? 'success' : 'default'}>
           {autonomyMode === 'FULLY_AUTONOMOUS' ? 'Fully autonomous' : 'Manual mode'}
         </Badge>
       </div>
 
-      <section className="space-y-3 rounded-xl border border-border bg-card p-4">
-        <h2 className="text-lg font-semibold">1. Series Studio</h2>
-        <div className="grid gap-3 sm:grid-cols-2">
-          {CORE_TOGGLES.map(({ key, label, hint }) => (
-            <label key={key} className="flex items-start gap-2 text-sm" title={hint}>
-              <input
-                type="checkbox"
-                className="mt-1"
-                checked={Boolean(toggles[key])}
-                onChange={(e) =>
-                  setToggles((prev) => ({
-                    ...prev,
-                    [key]: e.target.checked,
-                  }))
-                }
-              />
-              <span>
-                <span className="font-medium">{label}</span>
-                {hint ? <span className="block text-xs text-muted-foreground">{hint}</span> : null}
-              </span>
-            </label>
-          ))}
-        </div>
-      </section>
+      <ChoiceGroup
+        value={tab}
+        onChange={(value) => setTab(value as SettingsTab)}
+        options={[
+          { value: 'studio', label: 'Studio' },
+          { value: 'automation', label: 'Automation' },
+          { value: 'production', label: 'Production' },
+          { value: 'creative', label: 'Creative' },
+          { value: 'lanes', label: 'Lanes' },
+        ]}
+      />
 
-      <section className="space-y-3 rounded-xl border border-border bg-card p-4">
-        <h2 className="text-lg font-semibold">2. Autonomous Mode</h2>
-        <p className="text-sm text-muted-foreground">
-          Fully Autonomous Mode plans, produces, validates, and publishes without routine human
-          approval. This is separate from mock AI mode.
-        </p>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <label className="flex items-start gap-2 rounded-lg border border-border p-3 text-sm">
-            <input
-              type="radio"
-              className="mt-1"
-              name="autonomyMode"
-              checked={autonomyMode === 'MANUAL'}
-              onChange={() => setAutonomyMode('MANUAL')}
-            />
-            <span>
-              <span className="font-medium">Manual Mode</span>
-              <span className="block text-xs text-muted-foreground">
-                Keep movie/episode/replacement approval gates as configured below.
-              </span>
-            </span>
-          </label>
-          <label className="flex items-start gap-2 rounded-lg border border-border p-3 text-sm">
-            <input
-              type="radio"
-              className="mt-1"
-              name="autonomyMode"
-              checked={autonomyMode === 'FULLY_AUTONOMOUS'}
-              onChange={() => setAutonomyMode('FULLY_AUTONOMOUS')}
-            />
-            <span>
-              <span className="font-medium">Fully Autonomous Mode</span>
-              <span className="block text-xs text-muted-foreground">
-                Overrides routine approval gates. Emergency stop, budgets, and quality checks still
-                apply.
-              </span>
-            </span>
-          </label>
-        </div>
-        {autonomyMode === 'FULLY_AUTONOMOUS' ? (
-          <p className="rounded-md border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-sm">
-            Autonomy overrides movie approval, episode approval, and replacement approval. Stored
-            legacy toggles are preserved if you switch back to Manual Mode.
-          </p>
-        ) : null}
-      </section>
-
-      <section className="space-y-3 rounded-xl border border-border bg-card p-4">
-        <h2 className="text-lg font-semibold">3. Automation</h2>
-        <p className="text-sm text-muted-foreground">
-          Production automates scripting and media. Publishing stays independent so completed
-          episodes can wait as READY_TO_PUBLISH when publishing is off.
-        </p>
-        <div className="grid gap-3 sm:grid-cols-2">
-          {MASTER_TOGGLES.map(({ key, label, hint }) => (
-            <label key={key} className="flex items-start gap-2 text-sm" title={hint}>
-              <input
-                type="checkbox"
-                className="mt-1"
-                checked={Boolean(toggles[key])}
-                onChange={(e) =>
-                  setToggles((prev) => ({
-                    ...prev,
-                    [key]: e.target.checked,
-                  }))
-                }
-              />
-              <span>
-                <span className="font-medium">{label}</span>
-                {hint ? <span className="block text-xs text-muted-foreground">{hint}</span> : null}
-              </span>
-            </label>
-          ))}
-        </div>
-        {toggles.automaticEpisodeProduction &&
-        (!toggles.automaticVisualGeneration ||
-          !toggles.automaticMotionGeneration ||
-          !toggles.automaticNarration ||
-          !toggles.automaticRendering) ? (
-          <p className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm">
-            Automatic Episode Production is on, but one or more media stages are off. Automatic
-            runs will stop at the first disabled stage instead of skipping it.
-          </p>
-        ) : null}
-      </section>
-
-      {autonomyMode === 'MANUAL' ? (
-        <section className="space-y-3 rounded-xl border border-border bg-card p-4">
-          <h2 className="text-lg font-semibold">Approval controls (Manual Mode)</h2>
-          <div className="grid gap-3 sm:grid-cols-2">
-            {APPROVAL_TOGGLES.map(({ key, label, hint }) => (
-              <label key={key} className="flex items-start gap-2 text-sm" title={hint}>
-                <input
-                  type="checkbox"
-                  className="mt-1"
+      {tab === 'studio' ? (
+        <div className="space-y-4">
+          <SettingsSection
+            title="Studio power"
+            description="Enable Series Studio and the Morning / Evening lanes."
+          >
+            <div className="space-y-2">
+              {CORE_TOGGLES.map(({ key, label, hint }) => (
+                <Switch
+                  key={key}
                   checked={Boolean(toggles[key])}
+                  onCheckedChange={(v) => setToggle(key, v)}
+                  label={label}
+                  description={hint}
+                />
+              ))}
+            </div>
+          </SettingsSection>
+
+          <SettingsSection
+            title="Autonomy"
+            description="Fully autonomous plans, produces, validates, and publishes without routine human approval. Separate from mock AI."
+          >
+            <ChoiceGroup
+              variant="cards"
+              value={autonomyMode}
+              onChange={(value) => setAutonomyMode(value as 'MANUAL' | 'FULLY_AUTONOMOUS')}
+              options={[
+                {
+                  value: 'MANUAL',
+                  label: 'Manual mode',
+                  description: 'Keep movie, episode, and replacement approval gates.',
+                },
+                {
+                  value: 'FULLY_AUTONOMOUS',
+                  label: 'Fully autonomous',
+                  description: 'Skip routine approvals. Emergency stop, budgets, and quality still apply.',
+                },
+              ]}
+            />
+            {autonomyMode === 'FULLY_AUTONOMOUS' ? (
+              <p className="rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-sm">
+                Autonomy overrides routine approvals. Switch back to Manual anytime — your stored
+                gates are preserved.
+              </p>
+            ) : null}
+          </SettingsSection>
+        </div>
+      ) : null}
+
+      {tab === 'automation' ? (
+        <div className="space-y-4">
+          <SettingsSection
+            title="What runs automatically"
+            description="Production builds media. Publishing is independent — finished episodes can wait as ready-to-publish."
+          >
+            <div className="space-y-2">
+              {MASTER_TOGGLES.map(({ key, label, hint }) => (
+                <Switch
+                  key={key}
+                  checked={Boolean(toggles[key])}
+                  onCheckedChange={(v) => setToggle(key, v)}
+                  label={label}
+                  description={hint}
+                />
+              ))}
+            </div>
+            {stageWarning ? (
+              <p className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm">
+                Episode production is on, but a media stage is off. Runs stop at the first disabled
+                stage.
+              </p>
+            ) : null}
+          </SettingsSection>
+
+          {autonomyMode === 'MANUAL' ? (
+            <SettingsSection
+              title="Approvals"
+              description="Human gates while Manual mode is active."
+            >
+              <div className="space-y-2">
+                {APPROVAL_TOGGLES.map(({ key, label, hint }) => (
+                  <Switch
+                    key={key}
+                    checked={Boolean(toggles[key])}
+                    onCheckedChange={(v) => setToggle(key, v)}
+                    label={label}
+                    description={hint}
+                  />
+                ))}
+              </div>
+            </SettingsSection>
+          ) : (
+            <SettingsSection title="Approvals">
+              <p className="text-sm text-muted-foreground">
+                Routine approvals are automatic in Fully Autonomous mode. Switch to Manual on the
+                Studio tab to restore human gates.
+              </p>
+            </SettingsSection>
+          )}
+
+          <SettingsSection
+            title="Advanced stages"
+            description="Safeties for individual pipeline stages. The production master switch never overrides a disabled stage."
+            action={
+              <Button size="sm" variant="outline" type="button" onClick={() => setShowAdvanced((v) => !v)}>
+                {showAdvanced ? 'Hide' : 'Show'}
+              </Button>
+            }
+          >
+            {showAdvanced ? (
+              <div className="space-y-2">
+                {ADVANCED_STAGE_TOGGLES.map(({ key, label, hint }) => (
+                  <Switch
+                    key={key}
+                    checked={Boolean(toggles[key])}
+                    onCheckedChange={(v) => setToggle(key, v)}
+                    label={label}
+                    description={hint}
+                  />
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">Hidden by default to keep this page focused.</p>
+            )}
+          </SettingsSection>
+        </div>
+      ) : null}
+
+      {tab === 'production' ? (
+        <div className="space-y-4">
+          <SettingsSection
+            title="Format & duration"
+            description="Movie length, episode length, and clip length are independent. Clips stay ≤15s for Grok Lite."
+          >
+            <FormField label="Production format">
+              <ChoiceGroup
+                value={form.defaultProductionFormat ?? 'episodic'}
+                onChange={(value) =>
+                  setForm((prev) => ({ ...prev, defaultProductionFormat: value }))
+                }
+                options={[
+                  { value: 'episodic', label: 'Episodic series' },
+                  { value: 'standalone', label: 'Standalone movie' },
+                ]}
+              />
+            </FormField>
+
+            <FormField
+              label="Complete story / movie duration"
+              hint="Leave empty for legacy: episode count × episode duration."
+            >
+              <ChoiceGroup
+                size="sm"
+                value={form.defaultStoryDurationSeconds ?? ''}
+                onChange={(value) =>
+                  setForm((prev) => ({ ...prev, defaultStoryDurationSeconds: value }))
+                }
+                options={STORY_DURATION_PRESETS}
+              />
+              <Input
+                className="mt-2"
+                value={form.defaultStoryDurationSeconds ?? ''}
+                onChange={(e) =>
+                  setForm((prev) => ({ ...prev, defaultStoryDurationSeconds: e.target.value }))
+                }
+                placeholder="Custom seconds, e.g. 600"
+              />
+            </FormField>
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              <FormField
+                label="Episode duration (seconds)"
+                hint="For a 60s movie with 2 episodes, set this to 30 (or set story + episode count and we fit them)."
+              >
+                <Input
+                  value={form.defaultEpisodeDurationSeconds ?? ''}
                   onChange={(e) =>
-                    setToggles((prev) => ({
+                    setForm((prev) => ({
                       ...prev,
-                      [key]: e.target.checked,
+                      defaultEpisodeDurationSeconds: e.target.value,
                     }))
                   }
                 />
-                <span>
-                  <span className="font-medium">{label}</span>
-                  {hint ? <span className="block text-xs text-muted-foreground">{hint}</span> : null}
-                </span>
-              </label>
-            ))}
-          </div>
-        </section>
-      ) : (
-        <section className="space-y-2 rounded-xl border border-dashed border-border bg-muted/30 p-4">
-          <h2 className="text-lg font-semibold">Approvals</h2>
-          <p className="text-sm text-muted-foreground">
-            Routine movie, episode, and replacement approvals are handled automatically while Fully
-            Autonomous Mode is active. Switch to Manual Mode to restore human gates.
-          </p>
-        </section>
-      )}
-
-      <section className="space-y-3 rounded-xl border border-border bg-card p-4">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <h2 className="text-lg font-semibold">Advanced stage switches</h2>
-          <Button size="sm" variant="outline" type="button" onClick={() => setShowAdvanced((v) => !v)}>
-            {showAdvanced ? 'Hide' : 'Show'} advanced
-          </Button>
-        </div>
-        {showAdvanced ? (
-          <div className="grid gap-3 sm:grid-cols-2">
-            {ADVANCED_STAGE_TOGGLES.map(({ key, label, hint }) => (
-              <label key={key} className="flex items-start gap-2 text-sm" title={hint}>
-                <input
-                  type="checkbox"
-                  className="mt-1"
-                  checked={Boolean(toggles[key])}
+              </FormField>
+              <FormField
+                label="Episode count"
+                hint="With story duration set, Plan Movie fits this many episodes into the movie (e.g. 60s ÷ 2 = 30s each)."
+              >
+                <Input
+                  value={form.defaultPlannedEpisodeCount ?? ''}
                   onChange={(e) =>
-                    setToggles((prev) => ({
+                    setForm((prev) => ({ ...prev, defaultPlannedEpisodeCount: e.target.value }))
+                  }
+                />
+              </FormField>
+              <FormField label="Max clip duration (seconds)" hint="Grok Lite hard cap is 15.">
+                <Input
+                  value={form.defaultMaxClipDurationSeconds ?? ''}
+                  onChange={(e) =>
+                    setForm((prev) => ({
                       ...prev,
-                      [key]: e.target.checked,
+                      defaultMaxClipDurationSeconds: e.target.value,
                     }))
                   }
                 />
-                <span>
-                  <span className="font-medium">{label}</span>
-                  {hint ? <span className="block text-xs text-muted-foreground">{hint}</span> : null}
-                </span>
-              </label>
-            ))}
-          </div>
-        ) : (
-          <p className="text-sm text-muted-foreground">
-            Keep individual stage safeties here. The production master switch does not override a
-            disabled stage.
-          </p>
-        )}
-      </section>
+              </FormField>
+              <FormField label="Replacement trigger episode">
+                <Input
+                  value={form.defaultReplacementTriggerEpisode ?? ''}
+                  onChange={(e) =>
+                    setForm((prev) => ({
+                      ...prev,
+                      defaultReplacementTriggerEpisode: e.target.value,
+                    }))
+                  }
+                />
+              </FormField>
+            </div>
+          </SettingsSection>
 
-      <section className="space-y-4 rounded-xl border border-border bg-card p-4">
-        <h2 className="text-lg font-semibold">4. Production settings</h2>
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Planned episode count">
-            <Input
-              value={form.defaultPlannedEpisodeCount ?? ''}
-              onChange={(e) =>
-                setForm((prev) => ({ ...prev, defaultPlannedEpisodeCount: e.target.value }))
-              }
-            />
-          </Field>
-          <Field label="Episode duration (seconds)">
-            <Input
-              value={form.defaultEpisodeDurationSeconds ?? ''}
-              onChange={(e) =>
-                setForm((prev) => ({ ...prev, defaultEpisodeDurationSeconds: e.target.value }))
-              }
-            />
-          </Field>
-          <Field label="Replacement trigger episode">
-            <Input
-              value={form.defaultReplacementTriggerEpisode ?? ''}
-              onChange={(e) =>
-                setForm((prev) => ({
-                  ...prev,
-                  defaultReplacementTriggerEpisode: e.target.value,
-                }))
-              }
-            />
-          </Field>
-          <Field label="Max concurrent production">
-            <Input
-              value={form.maxConcurrentEpisodeProduction ?? ''}
-              onChange={(e) =>
-                setForm((prev) => ({
-                  ...prev,
-                  maxConcurrentEpisodeProduction: e.target.value,
-                }))
-              }
-            />
-          </Field>
-          <Field label="Max retries">
-            <Input
-              value={form.maxRetries ?? ''}
-              onChange={(e) => setForm((prev) => ({ ...prev, maxRetries: e.target.value }))}
-            />
-          </Field>
-          <Field label="Quality threshold">
-            <Input
-              value={form.qualityAcceptanceThreshold ?? ''}
-              onChange={(e) =>
-                setForm((prev) => ({ ...prev, qualityAcceptanceThreshold: e.target.value }))
-              }
-              placeholder="0.6"
-            />
-            <p className="mt-1 text-xs text-muted-foreground">
-              Episode passes when score ≥ this value (0–1). Soft checks like duration can fail;
-              missing render/output still always fails.
-            </p>
-          </Field>
-          <Field label="Default production lead time (minutes)">
-            <Input
-              value={form.defaultProductionLeadTimeMinutes ?? ''}
-              onChange={(e) =>
-                setForm((prev) => ({
-                  ...prev,
-                  defaultProductionLeadTimeMinutes: e.target.value,
-                }))
-              }
-            />
-          </Field>
-          <Field label="Default production start mode">
-            <select
-              className="flex h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-              value={form.defaultProductionStartMode ?? 'NEXT_WINDOW'}
-              onChange={(e) =>
-                setForm((prev) => ({ ...prev, defaultProductionStartMode: e.target.value }))
-              }
-            >
-              <option value="IMMEDIATE">Immediately after approval</option>
-              <option value="NEXT_WINDOW">At next scheduled production window</option>
-              <option value="CUSTOM">Custom date and time</option>
-              <option value="MANUAL">Manual start only</option>
-            </select>
-          </Field>
-          <Field label="Language">
-            <Input
-              value={form.language ?? ''}
-              onChange={(e) => setForm((prev) => ({ ...prev, language: e.target.value }))}
-            />
-          </Field>
-          <Field label="Tone">
-            <Input
-              value={form.tone ?? ''}
-              onChange={(e) => setForm((prev) => ({ ...prev, tone: e.target.value }))}
-            />
-          </Field>
-          <Field label="Visual direction">
-            <Input
-              value={form.visualDirection ?? ''}
-              onChange={(e) => setForm((prev) => ({ ...prev, visualDirection: e.target.value }))}
-            />
-          </Field>
-          <Field label="Daily budget USD">
-            <Input
-              value={form.dailyBudgetUsd ?? ''}
-              onChange={(e) => setForm((prev) => ({ ...prev, dailyBudgetUsd: e.target.value }))}
-            />
-          </Field>
-          <Field label="Monthly budget USD">
-            <Input
-              value={form.monthlyBudgetUsd ?? ''}
-              onChange={(e) => setForm((prev) => ({ ...prev, monthlyBudgetUsd: e.target.value }))}
-            />
-          </Field>
-          <Field label="Max cost per episode USD">
-            <Input
-              value={form.maxCostPerEpisodeUsd ?? ''}
-              onChange={(e) =>
-                setForm((prev) => ({ ...prev, maxCostPerEpisodeUsd: e.target.value }))
-              }
-            />
-          </Field>
+          <SettingsSection title="Quality & schedule defaults">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <FormField label="Max concurrent production">
+                <Input
+                  value={form.maxConcurrentEpisodeProduction ?? ''}
+                  onChange={(e) =>
+                    setForm((prev) => ({
+                      ...prev,
+                      maxConcurrentEpisodeProduction: e.target.value,
+                    }))
+                  }
+                />
+              </FormField>
+              <FormField label="Max retries">
+                <Input
+                  value={form.maxRetries ?? ''}
+                  onChange={(e) => setForm((prev) => ({ ...prev, maxRetries: e.target.value }))}
+                />
+              </FormField>
+              <FormField
+                label="Quality threshold"
+                hint="Pass when score ≥ this value (0–1)."
+              >
+                <Input
+                  value={form.qualityAcceptanceThreshold ?? ''}
+                  onChange={(e) =>
+                    setForm((prev) => ({ ...prev, qualityAcceptanceThreshold: e.target.value }))
+                  }
+                />
+              </FormField>
+              <FormField label="Default lead time (minutes)">
+                <Input
+                  value={form.defaultProductionLeadTimeMinutes ?? ''}
+                  onChange={(e) =>
+                    setForm((prev) => ({
+                      ...prev,
+                      defaultProductionLeadTimeMinutes: e.target.value,
+                    }))
+                  }
+                />
+              </FormField>
+              <FormField label="Default production start">
+                <Select
+                  value={form.defaultProductionStartMode ?? 'NEXT_WINDOW'}
+                  onChange={(e) =>
+                    setForm((prev) => ({
+                      ...prev,
+                      defaultProductionStartMode: e.target.value,
+                    }))
+                  }
+                  options={START_MODE_OPTIONS}
+                />
+              </FormField>
+              <FormField label="Language">
+                <Input
+                  value={form.language ?? ''}
+                  onChange={(e) => setForm((prev) => ({ ...prev, language: e.target.value }))}
+                />
+              </FormField>
+              <FormField label="Tone">
+                <Input
+                  value={form.tone ?? ''}
+                  onChange={(e) => setForm((prev) => ({ ...prev, tone: e.target.value }))}
+                />
+              </FormField>
+              <FormField label="Visual direction">
+                <Input
+                  value={form.visualDirection ?? ''}
+                  onChange={(e) =>
+                    setForm((prev) => ({ ...prev, visualDirection: e.target.value }))
+                  }
+                />
+              </FormField>
+            </div>
+          </SettingsSection>
+
+          <SettingsSection title="Budgets & channels">
+            <div className="grid gap-4 sm:grid-cols-3">
+              <FormField label="Daily budget USD">
+                <Input
+                  value={form.dailyBudgetUsd ?? ''}
+                  onChange={(e) => setForm((prev) => ({ ...prev, dailyBudgetUsd: e.target.value }))}
+                />
+              </FormField>
+              <FormField label="Monthly budget USD">
+                <Input
+                  value={form.monthlyBudgetUsd ?? ''}
+                  onChange={(e) =>
+                    setForm((prev) => ({ ...prev, monthlyBudgetUsd: e.target.value }))
+                  }
+                />
+              </FormField>
+              <FormField label="Max cost per episode USD">
+                <Input
+                  value={form.maxCostPerEpisodeUsd ?? ''}
+                  onChange={(e) =>
+                    setForm((prev) => ({ ...prev, maxCostPerEpisodeUsd: e.target.value }))
+                  }
+                />
+              </FormField>
+            </div>
+            <FormField label="Publish channels">
+              <ChoiceGroup
+                multiple
+                value={PLATFORMS.filter((p) => channels[p] !== false)}
+                onChange={(selected) =>
+                  setChannels(
+                    Object.fromEntries(PLATFORMS.map((p) => [p, selected.includes(p)])),
+                  )
+                }
+                options={PLATFORMS.map((platform) => ({
+                  value: platform,
+                  label: platform.charAt(0) + platform.slice(1).toLowerCase(),
+                }))}
+              />
+            </FormField>
+          </SettingsSection>
         </div>
-      </section>
+      ) : null}
 
-      <section className="space-y-3 rounded-xl border border-border bg-card p-4">
-        <h2 className="text-lg font-semibold">Channel publishing</h2>
-        <div className="flex flex-wrap gap-4">
-          {PLATFORMS.map((platform) => (
-            <label key={platform} className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={channels[platform] !== false}
+      {tab === 'creative' ? (
+        <SettingsSection
+          title="Creative defaults"
+          description="Select genres, themes, and style — Plan Movie invents a fresh story from those choices. Lane settings override these; movies freeze values at generation time."
+        >
+          <FormField label="Genres">
+            <ChoiceGroup
+              multiple
+              size="sm"
+              value={creative.genres ?? []}
+              onChange={(genres) => setCreative((prev) => ({ ...prev, genres }))}
+              options={SERIES_GENRE_OPTIONS.map((genre) => ({ value: genre, label: genre }))}
+            />
+          </FormField>
+          <FormField label="Themes">
+            <ChoiceGroup
+              multiple
+              size="sm"
+              value={creative.themes ?? []}
+              onChange={(themes) => setCreative((prev) => ({ ...prev, themes }))}
+              options={SERIES_THEME_OPTIONS.map((theme) => ({ value: theme, label: theme }))}
+            />
+          </FormField>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <FormField label="Target audience">
+              <Input
+                value={creative.targetAudience ?? ''}
                 onChange={(e) =>
-                  setChannels((prev) => ({ ...prev, [platform]: e.target.checked }))
+                  setCreative((prev) => ({ ...prev, targetAudience: e.target.value }))
                 }
               />
-              {platform}
-            </label>
-          ))}
-        </div>
-      </section>
-
-      <section className="space-y-4 rounded-xl border border-border bg-card p-4">
-        <h2 className="text-lg font-semibold">5. Creative defaults</h2>
-        <p className="text-sm text-muted-foreground">
-          Global creative defaults for Series Studio only (not standalone automation). Lane settings
-          override these; movie snapshots freeze values at generation time.
-        </p>
-        <div className="space-y-2">
-          <label className="text-sm font-medium">Genres</label>
-          <div className="flex flex-wrap gap-2">
-            {SERIES_GENRE_OPTIONS.map((genre) => (
-              <button
-                key={genre}
-                type="button"
-                className={`rounded-md border px-2 py-1 text-xs ${
-                  (creative.genres ?? []).includes(genre)
-                    ? 'border-primary bg-primary/10 text-primary'
-                    : 'border-input'
-                }`}
-                onClick={() =>
-                  toggleList(creative.genres, genre, (genres) =>
-                    setCreative((prev) => ({ ...prev, genres })),
-                  )
+            </FormField>
+            <FormField label="Dialogue style">
+              <Input
+                value={creative.dialogueStyle ?? ''}
+                onChange={(e) =>
+                  setCreative((prev) => ({ ...prev, dialogueStyle: e.target.value }))
                 }
-              >
-                {genre}
-              </button>
-            ))}
-          </div>
-        </div>
-        <div className="space-y-2">
-          <label className="text-sm font-medium">Themes</label>
-          <div className="flex flex-wrap gap-2">
-            {SERIES_THEME_OPTIONS.map((theme) => (
-              <button
-                key={theme}
-                type="button"
-                className={`rounded-md border px-2 py-1 text-xs ${
-                  (creative.themes ?? []).includes(theme)
-                    ? 'border-primary bg-primary/10 text-primary'
-                    : 'border-input'
-                }`}
-                onClick={() =>
-                  toggleList(creative.themes, theme, (themes) =>
-                    setCreative((prev) => ({ ...prev, themes })),
-                  )
+                placeholder="Simple everyday spoken English"
+              />
+            </FormField>
+            <FormField label="Cliffhanger intensity">
+              <ChoiceGroup
+                value={creative.cliffhangerIntensity ?? 'medium'}
+                onChange={(value) =>
+                  setCreative((prev) => ({
+                    ...prev,
+                    cliffhangerIntensity: value as 'low' | 'medium' | 'high',
+                  }))
                 }
-              >
-                {theme}
-              </button>
-            ))}
-          </div>
-        </div>
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Target audience">
-            <Input
-              value={creative.targetAudience ?? ''}
-              onChange={(e) =>
-                setCreative((prev) => ({ ...prev, targetAudience: e.target.value }))
-              }
-            />
-          </Field>
-          <Field label="Dialogue style">
-            <Input
-              value={creative.dialogueStyle ?? ''}
-              onChange={(e) =>
-                setCreative((prev) => ({ ...prev, dialogueStyle: e.target.value }))
-              }
-              placeholder="Simple everyday spoken English — short sentences, no fancy words"
-            />
-          </Field>
-          <Field label="Cliffhanger intensity">
-            <select
-              className="flex h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-              value={creative.cliffhangerIntensity ?? 'medium'}
-              onChange={(e) =>
-                setCreative((prev) => ({
-                  ...prev,
-                  cliffhangerIntensity: e.target.value as 'low' | 'medium' | 'high',
-                }))
-              }
+                options={[
+                  { value: 'low', label: 'Low' },
+                  { value: 'medium', label: 'Medium' },
+                  { value: 'high', label: 'High' },
+                ]}
+              />
+            </FormField>
+            <FormField
+              label="Aspect ratio"
+              hint="Series Studio is locked to TikTok / YouTube Shorts vertical 9:16."
             >
-              <option value="low">Low</option>
-              <option value="medium">Medium</option>
-              <option value="high">High</option>
-            </select>
-          </Field>
-          <Field label="Aspect ratio">
-            <Input
-              value={creative.aspectRatio ?? ''}
-              onChange={(e) => setCreative((prev) => ({ ...prev, aspectRatio: e.target.value }))}
-              placeholder="9:16"
-            />
-          </Field>
-          <Field label="Story concept">
-            <Input
+              <ChoiceGroup
+                value="9:16"
+                onChange={() => setCreative((prev) => ({ ...prev, aspectRatio: '9:16' }))}
+                options={[{ value: '9:16', label: '9:16 (TikTok / YouTube Shorts)' }]}
+              />
+            </FormField>
+          </div>
+          <FormField
+            label="Story concept (optional)"
+            hint="Leave empty so Plan Movie invents a fresh story from your selected genres and themes. Only fill this if you want a soft inspiration seed — it will not lock every movie to one plot."
+          >
+            <Textarea
               value={creative.storyConcept ?? ''}
-              onChange={(e) =>
-                setCreative((prev) => ({ ...prev, storyConcept: e.target.value }))
-              }
+              onChange={(e) => setCreative((prev) => ({ ...prev, storyConcept: e.target.value }))}
+              rows={3}
+              placeholder="Leave empty for automatic stories from genres/themes"
             />
-          </Field>
-          <Field label="Custom creative instructions">
-            <Input
+          </FormField>
+          <FormField label="Custom creative instructions">
+            <Textarea
               value={creative.customCreativeInstructions ?? ''}
               onChange={(e) =>
                 setCreative((prev) => ({
@@ -750,394 +845,336 @@ export function SeriesSettingsPage() {
                   customCreativeInstructions: e.target.value,
                 }))
               }
-              placeholder="Avoid purple prose. Write like a modern Netflix drama, easy to understand."
+              rows={3}
+              placeholder="Avoid purple prose. Write like a modern Netflix drama."
             />
-          </Field>
-        </div>
-        <label className="flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
+          </FormField>
+          <Switch
             checked={creative.characterConsistencyRequired !== false}
-            onChange={(e) =>
-              setCreative((prev) => ({
-                ...prev,
-                characterConsistencyRequired: e.target.checked,
-              }))
+            onCheckedChange={(v) =>
+              setCreative((prev) => ({ ...prev, characterConsistencyRequired: v }))
             }
+            label="Require character visual consistency"
           />
-          Require character visual consistency
-        </label>
-      </section>
+        </SettingsSection>
+      ) : null}
 
-      <Button disabled={saveConfig.isPending} onClick={() => saveConfig.mutate()}>
-        Save Series settings
-      </Button>
+      {tab === 'lanes' ? (
+        <div className="space-y-4">
+          <SettingsSection
+            title="Lane schedules & production"
+            description="Each lane has its own schedule and production defaults (episode count, durations, replacement trigger). Global Production settings are defaults; lane values win for that lane."
+          >
+            <div className="grid gap-4 lg:grid-cols-2">
+              {lanes.map((lane) => {
+                const draft = laneDrafts[lane.id] ?? emptyLaneDraft(lane);
+                return (
+                  <div
+                    key={lane.id}
+                    className="space-y-3 rounded-xl border border-border bg-background/40 p-4"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <h3 className="font-medium">{lane.name}</h3>
+                      <Badge tone={statusTone(lane.status)}>
+                        {lane.status === 'PAUSED' ? 'Paused' : lane.status}
+                      </Badge>
+                    </div>
+                    <FormField label="Name">
+                      <Input
+                        value={draft.name}
+                        onChange={(e) => patchLaneDraft(lane, { name: e.target.value })}
+                      />
+                    </FormField>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <FormField label="Publish time" hint="HH:MM">
+                        <Input
+                          value={draft.publishTime}
+                          onChange={(e) => patchLaneDraft(lane, { publishTime: e.target.value })}
+                        />
+                      </FormField>
+                      <FormField label="Timezone">
+                        <Select
+                          value={draft.timezone}
+                          onChange={(e) => patchLaneDraft(lane, { timezone: e.target.value })}
+                          options={TIMEZONE_OPTIONS}
+                        />
+                      </FormField>
+                      <FormField label="Lead time (minutes)">
+                        <Input
+                          value={draft.productionLeadTimeMinutes}
+                          onChange={(e) =>
+                            patchLaneDraft(lane, { productionLeadTimeMinutes: e.target.value })
+                          }
+                        />
+                      </FormField>
+                      <FormField label="Preferred start" hint="Optional HH:MM">
+                        <Input
+                          value={draft.preferredProductionTime}
+                          placeholder="From publish − lead"
+                          onChange={(e) =>
+                            patchLaneDraft(lane, { preferredProductionTime: e.target.value })
+                          }
+                        />
+                      </FormField>
+                    </div>
+                    <FormField label="When production begins">
+                      <Select
+                        value={draft.productionStartMode}
+                        onChange={(e) =>
+                          patchLaneDraft(lane, { productionStartMode: e.target.value })
+                        }
+                        options={START_MODE_OPTIONS}
+                      />
+                    </FormField>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <FormField label="Episode count">
+                        <Input
+                          value={draft.plannedEpisodeCount}
+                          onChange={(e) =>
+                            patchLaneDraft(lane, { plannedEpisodeCount: e.target.value })
+                          }
+                        />
+                      </FormField>
+                      <FormField label="Episode duration (s)">
+                        <Input
+                          value={draft.targetEpisodeDurationSeconds}
+                          onChange={(e) =>
+                            patchLaneDraft(lane, {
+                              targetEpisodeDurationSeconds: e.target.value,
+                            })
+                          }
+                        />
+                      </FormField>
+                      <FormField label="Story duration (s)" hint="Optional complete movie length">
+                        <Input
+                          value={draft.targetStoryDurationSeconds}
+                          placeholder="e.g. 60"
+                          onChange={(e) =>
+                            patchLaneDraft(lane, {
+                              targetStoryDurationSeconds: e.target.value,
+                            })
+                          }
+                        />
+                      </FormField>
+                      <FormField label="Max clip (s)" hint="Grok Lite ≤15">
+                        <Input
+                          value={draft.maxClipDurationSeconds}
+                          onChange={(e) =>
+                            patchLaneDraft(lane, { maxClipDurationSeconds: e.target.value })
+                          }
+                        />
+                      </FormField>
+                      <FormField
+                        label="Replacement trigger episode"
+                        hint="Must be ≤ episode count"
+                      >
+                        <Input
+                          value={draft.replacementTriggerEpisode}
+                          onChange={(e) =>
+                            patchLaneDraft(lane, {
+                              replacementTriggerEpisode: e.target.value,
+                            })
+                          }
+                        />
+                      </FormField>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        size="sm"
+                        variant={laneCreativeId === lane.id ? 'default' : 'outline'}
+                        onClick={() => {
+                          setLaneCreativeId(lane.id);
+                          setLaneCreative(lane.creativeSettings ?? {});
+                        }}
+                      >
+                        Edit creative
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={saveLane.isPending}
+                        onClick={() => saveLane.mutate(lane)}
+                      >
+                        Save lane
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </SettingsSection>
 
-      <section className="space-y-4">
-        <h2 className="text-lg font-semibold">6. Lane configuration</h2>
-        <p className="text-sm text-muted-foreground">
-          Each lane has its own schedule, timezone, and creative overrides. New lanes default to
-          Africa/Lagos.
-        </p>
-        <div className="grid gap-4 lg:grid-cols-2">
-          {(lanesQuery.data ?? []).map((lane) => (
-            <div key={lane.id} className="space-y-3 rounded-xl border border-border bg-card p-4">
-              <div className="flex items-center justify-between">
-                <h3 className="font-medium">{lane.name}</h3>
-                <Badge tone={statusTone(lane.status)}>{lane.status}</Badge>
+          {laneCreativeId ? (
+            <SettingsSection
+              title={`Creative — ${lanes.find((l) => l.id === laneCreativeId)?.name ?? 'Lane'}`}
+              description="Overrides global creative defaults for this lane only."
+            >
+              <FormField label="Genres">
+                <ChoiceGroup
+                  multiple
+                  size="sm"
+                  value={laneCreative.genres ?? []}
+                  onChange={(genres) => setLaneCreative((prev) => ({ ...prev, genres }))}
+                  options={SERIES_GENRE_OPTIONS.map((genre) => ({ value: genre, label: genre }))}
+                />
+              </FormField>
+              <FormField label="Themes">
+                <ChoiceGroup
+                  multiple
+                  size="sm"
+                  value={laneCreative.themes ?? []}
+                  onChange={(themes) => setLaneCreative((prev) => ({ ...prev, themes }))}
+                  options={SERIES_THEME_OPTIONS.map((theme) => ({ value: theme, label: theme }))}
+                />
+              </FormField>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <FormField label="Audience">
+                  <Input
+                    value={laneCreative.targetAudience ?? ''}
+                    onChange={(e) =>
+                      setLaneCreative((prev) => ({ ...prev, targetAudience: e.target.value }))
+                    }
+                  />
+                </FormField>
+                <FormField label="Language">
+                  <Input
+                    value={laneCreative.language ?? ''}
+                    onChange={(e) =>
+                      setLaneCreative((prev) => ({ ...prev, language: e.target.value }))
+                    }
+                    placeholder="en"
+                  />
+                </FormField>
+                <FormField
+                  label="Visual style"
+                  hint="Locked default is stylized 3D cartoon (not photoreal humans). Character reference stills are generated at Plan Movie and reused on every Grok clip."
+                >
+                  <Textarea
+                    value={laneCreative.visualStyle ?? ''}
+                    onChange={(e) =>
+                      setLaneCreative((prev) => ({ ...prev, visualStyle: e.target.value }))
+                    }
+                    rows={3}
+                    placeholder="Stylized cinematic 3D cartoon (Pixar/DreamWorks-like)…"
+                  />
+                </FormField>
+                <FormField label="Tone">
+                  <Input
+                    value={laneCreative.tone ?? ''}
+                    onChange={(e) =>
+                      setLaneCreative((prev) => ({ ...prev, tone: e.target.value }))
+                    }
+                  />
+                </FormField>
+                <FormField label="Dialogue density">
+                  <ChoiceGroup
+                    value={laneCreative.dialogueDensity ?? 'high'}
+                    onChange={(value) =>
+                      setLaneCreative((prev) => ({
+                        ...prev,
+                        dialogueDensity: value as SeriesCreativeSettings['dialogueDensity'],
+                      }))
+                    }
+                    options={[
+                      { value: 'low', label: 'Low' },
+                      { value: 'medium', label: 'Medium' },
+                      { value: 'high', label: 'High' },
+                    ]}
+                  />
+                </FormField>
+                <FormField label="Narration">
+                  <ChoiceGroup
+                    value={laneCreative.narrationPreference ?? 'avoid'}
+                    onChange={(value) =>
+                      setLaneCreative((prev) => ({
+                        ...prev,
+                        narrationPreference:
+                          value as SeriesCreativeSettings['narrationPreference'],
+                      }))
+                    }
+                    options={[
+                      { value: 'avoid', label: 'Avoid' },
+                      { value: 'allowed', label: 'Allowed' },
+                      { value: 'required', label: 'Required' },
+                    ]}
+                  />
+                </FormField>
               </div>
-              <Field label="Name">
-                <Input
-                  value={laneDrafts[lane.id]?.name ?? ''}
-                  onChange={(e) =>
-                    setLaneDrafts((prev) => ({
-                      ...prev,
-                      [lane.id]: {
-                        name: e.target.value,
-                        publishTime: prev[lane.id]?.publishTime ?? lane.publishTime,
-                        timezone: prev[lane.id]?.timezone ?? lane.timezone,
-                        productionLeadTimeMinutes:
-                          prev[lane.id]?.productionLeadTimeMinutes ??
-                          String(lane.productionLeadTimeMinutes ?? 240),
-                        preferredProductionTime:
-                          prev[lane.id]?.preferredProductionTime ??
-                          lane.preferredProductionTime ??
-                          '',
-                        productionStartMode:
-                          prev[lane.id]?.productionStartMode ??
-                          lane.productionStartMode ??
-                          'NEXT_WINDOW',
-                      },
-                    }))
-                  }
+              <div className="space-y-2">
+                <Switch
+                  checked
+                  disabled
+                  onCheckedChange={() => undefined}
+                  label="Dialogue-driven storytelling"
+                  description="Always on for every lane (morning, evening, custom). Grok clips only — fal / Hailuo narration path removed from Series Studio."
                 />
-              </Field>
-              <Field label="Publish time (HH:MM)">
-                <Input
-                  value={laneDrafts[lane.id]?.publishTime ?? ''}
-                  onChange={(e) =>
-                    setLaneDrafts((prev) => ({
-                      ...prev,
-                      [lane.id]: {
-                        ...(prev[lane.id] ?? {
-                          name: lane.name,
-                          publishTime: lane.publishTime,
-                          timezone: lane.timezone,
-                          productionLeadTimeMinutes: String(lane.productionLeadTimeMinutes ?? 240),
-                          preferredProductionTime: lane.preferredProductionTime ?? '',
-                          productionStartMode: lane.productionStartMode ?? 'NEXT_WINDOW',
-                        }),
-                        publishTime: e.target.value,
-                      },
-                    }))
+                <Switch
+                  checked={laneCreative.lipSyncRequired !== false}
+                  onCheckedChange={(v) =>
+                    setLaneCreative((prev) => ({ ...prev, lipSyncRequired: v }))
                   }
+                  label="Require lip-sync for speaking shots"
                 />
-              </Field>
-              <Field label="Timezone (IANA)">
-                <select
-                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-                  value={laneDrafts[lane.id]?.timezone ?? 'Africa/Lagos'}
-                  onChange={(e) =>
-                    setLaneDrafts((prev) => ({
-                      ...prev,
-                      [lane.id]: {
-                        ...(prev[lane.id] ?? {
-                          name: lane.name,
-                          publishTime: lane.publishTime,
-                          timezone: lane.timezone,
-                          productionLeadTimeMinutes: String(lane.productionLeadTimeMinutes ?? 240),
-                          preferredProductionTime: lane.preferredProductionTime ?? '',
-                          productionStartMode: lane.productionStartMode ?? 'NEXT_WINDOW',
-                        }),
-                        timezone: e.target.value,
-                      },
-                    }))
+                <Switch
+                  checked={laneCreative.subtitlePreference !== false}
+                  onCheckedChange={(v) =>
+                    setLaneCreative((prev) => ({ ...prev, subtitlePreference: v }))
                   }
-                >
-                  <option value="Africa/Lagos">Africa/Lagos</option>
-                  <option value="UTC">UTC</option>
-                  <option value="America/New_York">America/New_York</option>
-                  <option value="Europe/London">Europe/London</option>
-                  <option value="Asia/Dubai">Asia/Dubai</option>
-                </select>
-              </Field>
-              <Field label="Production lead time (minutes)">
-                <Input
-                  value={laneDrafts[lane.id]?.productionLeadTimeMinutes ?? '240'}
-                  onChange={(e) =>
-                    setLaneDrafts((prev) => ({
-                      ...prev,
-                      [lane.id]: {
-                        ...(prev[lane.id] ?? {
-                          name: lane.name,
-                          publishTime: lane.publishTime,
-                          timezone: lane.timezone,
-                          productionLeadTimeMinutes: '240',
-                          preferredProductionTime: '',
-                          productionStartMode: 'NEXT_WINDOW',
-                        }),
-                        productionLeadTimeMinutes: e.target.value,
-                      },
-                    }))
-                  }
+                  label="Generate dialogue subtitles"
                 />
-              </Field>
-              <Field label="Preferred production start (HH:MM, optional)">
-                <Input
-                  value={laneDrafts[lane.id]?.preferredProductionTime ?? ''}
-                  placeholder="Derived from publish − lead"
+              </div>
+              <FormField
+                label="Story concept (optional)"
+                hint="Leave empty to auto-generate from this lane’s genres and themes. Clear any old fixed premise if you want variety."
+              >
+                <Textarea
+                  value={laneCreative.storyConcept ?? ''}
                   onChange={(e) =>
-                    setLaneDrafts((prev) => ({
-                      ...prev,
-                      [lane.id]: {
-                        ...(prev[lane.id] ?? {
-                          name: lane.name,
-                          publishTime: lane.publishTime,
-                          timezone: lane.timezone,
-                          productionLeadTimeMinutes: '240',
-                          preferredProductionTime: '',
-                          productionStartMode: 'NEXT_WINDOW',
-                        }),
-                        preferredProductionTime: e.target.value,
-                      },
-                    }))
+                    setLaneCreative((prev) => ({ ...prev, storyConcept: e.target.value }))
                   }
+                  rows={3}
+                  placeholder="Leave empty for automatic stories from genres/themes"
                 />
-              </Field>
-              <Field label="When should media production begin?">
-                <select
-                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-                  value={laneDrafts[lane.id]?.productionStartMode ?? 'NEXT_WINDOW'}
+              </FormField>
+              <FormField label="Content exclusions" hint="Comma-separated.">
+                <Textarea
+                  value={(laneCreative.contentExclusions ?? []).join(', ')}
                   onChange={(e) =>
-                    setLaneDrafts((prev) => ({
+                    setLaneCreative((prev) => ({
                       ...prev,
-                      [lane.id]: {
-                        ...(prev[lane.id] ?? {
-                          name: lane.name,
-                          publishTime: lane.publishTime,
-                          timezone: lane.timezone,
-                          productionLeadTimeMinutes: '240',
-                          preferredProductionTime: '',
-                          productionStartMode: 'NEXT_WINDOW',
-                        }),
-                        productionStartMode: e.target.value,
-                      },
+                      contentExclusions: e.target.value
+                        .split(',')
+                        .map((s) => s.trim())
+                        .filter(Boolean),
                     }))
                   }
-                >
-                  <option value="IMMEDIATE">Immediately after approval</option>
-                  <option value="NEXT_WINDOW">At next scheduled production window</option>
-                  <option value="CUSTOM">Custom date and time</option>
-                  <option value="MANUAL">Manual start only</option>
-                </select>
-              </Field>
+                  rows={2}
+                />
+              </FormField>
               <Button
-                size="sm"
-                variant="outline"
+                disabled={saveLane.isPending}
                 onClick={() => {
-                  setLaneCreativeId(lane.id);
-                  setLaneCreative(lane.creativeSettings ?? {});
+                  const lane = lanes.find((l) => l.id === laneCreativeId);
+                  if (lane) saveLane.mutate(lane);
                 }}
               >
-                Edit creative for this lane
+                Save lane creative
               </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={saveLane.isPending}
-                onClick={() => saveLane.mutate(lane)}
-              >
-                Save lane
-              </Button>
-            </div>
-          ))}
+            </SettingsSection>
+          ) : null}
         </div>
+      ) : null}
 
-        {laneCreativeId ? (
-          <div className="space-y-3 rounded-xl border border-border bg-card p-4">
-            <h3 className="font-medium">
-              Lane creative —{' '}
-              {(lanesQuery.data ?? []).find((l) => l.id === laneCreativeId)?.name ?? 'Lane'}
-            </h3>
-            <p className="text-xs text-muted-foreground">Genres</p>
-            <div className="flex flex-wrap gap-2">
-              {SERIES_GENRE_OPTIONS.map((genre) => (
-                <button
-                  key={genre}
-                  type="button"
-                  className={`rounded-md border px-2 py-1 text-xs ${
-                    (laneCreative.genres ?? []).includes(genre)
-                      ? 'border-primary bg-primary/10 text-primary'
-                      : 'border-input'
-                  }`}
-                  onClick={() =>
-                    toggleList(laneCreative.genres, genre, (genres) =>
-                      setLaneCreative((prev) => ({ ...prev, genres })),
-                    )
-                  }
-                >
-                  {genre}
-                </button>
-              ))}
-            </div>
-            <p className="text-xs text-muted-foreground">Themes</p>
-            <div className="flex flex-wrap gap-2">
-              {SERIES_THEME_OPTIONS.map((theme) => (
-                <button
-                  key={theme}
-                  type="button"
-                  className={`rounded-md border px-2 py-1 text-xs ${
-                    (laneCreative.themes ?? []).includes(theme)
-                      ? 'border-primary bg-primary/10 text-primary'
-                      : 'border-input'
-                  }`}
-                  onClick={() =>
-                    toggleList(laneCreative.themes, theme, (themes) =>
-                      setLaneCreative((prev) => ({ ...prev, themes })),
-                    )
-                  }
-                >
-                  {theme}
-                </button>
-              ))}
-            </div>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <Field label="Audience">
-                <Input
-                  value={laneCreative.targetAudience ?? ''}
-                  onChange={(e) =>
-                    setLaneCreative((prev) => ({ ...prev, targetAudience: e.target.value }))
-                  }
-                />
-              </Field>
-              <Field label="Language">
-                <Input
-                  value={laneCreative.language ?? ''}
-                  onChange={(e) =>
-                    setLaneCreative((prev) => ({ ...prev, language: e.target.value }))
-                  }
-                  placeholder="en"
-                />
-              </Field>
-              <Field label="Visual style">
-                <Input
-                  value={laneCreative.visualStyle ?? ''}
-                  onChange={(e) =>
-                    setLaneCreative((prev) => ({ ...prev, visualStyle: e.target.value }))
-                  }
-                  placeholder="Semi-realistic cinematic 3D…"
-                />
-              </Field>
-              <Field label="Tone">
-                <Input
-                  value={laneCreative.tone ?? ''}
-                  onChange={(e) => setLaneCreative((prev) => ({ ...prev, tone: e.target.value }))}
-                />
-              </Field>
-              <Field label="Dialogue density">
-                <Input
-                  value={laneCreative.dialogueDensity ?? 'high'}
-                  onChange={(e) =>
-                    setLaneCreative((prev) => ({
-                      ...prev,
-                      dialogueDensity: e.target.value as SeriesCreativeSettings['dialogueDensity'],
-                    }))
-                  }
-                  placeholder="high | medium | low"
-                />
-              </Field>
-              <Field label="Narration preference">
-                <Input
-                  value={laneCreative.narrationPreference ?? 'avoid'}
-                  onChange={(e) =>
-                    setLaneCreative((prev) => ({
-                      ...prev,
-                      narrationPreference: e.target
-                        .value as SeriesCreativeSettings['narrationPreference'],
-                    }))
-                  }
-                  placeholder="avoid | allowed | required"
-                />
-              </Field>
-            </div>
-            <label className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={laneCreative.dialogueDrivenStorytelling === true}
-                onChange={(e) =>
-                  setLaneCreative((prev) => ({
-                    ...prev,
-                    dialogueDrivenStorytelling: e.target.checked,
-                    ...(e.target.checked
-                      ? { narrationPreference: 'avoid' as const }
-                      : { narrationPreference: 'required' as const }),
-                  }))
-                }
-              />
-              Dialogue-driven storytelling (characters speak; no narrator slideshow)
-            </label>
-            <label className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={laneCreative.lipSyncRequired !== false}
-                onChange={(e) =>
-                  setLaneCreative((prev) => ({
-                    ...prev,
-                    lipSyncRequired: e.target.checked,
-                  }))
-                }
-              />
-              Require lip-sync for speaking shots
-            </label>
-            <label className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={laneCreative.subtitlePreference !== false}
-                onChange={(e) =>
-                  setLaneCreative((prev) => ({
-                    ...prev,
-                    subtitlePreference: e.target.checked,
-                  }))
-                }
-              />
-              Generate dialogue subtitles
-            </label>
-            <Field label="Story concept / creative instructions">
-              <Input
-                value={laneCreative.storyConcept ?? ''}
-                onChange={(e) =>
-                  setLaneCreative((prev) => ({ ...prev, storyConcept: e.target.value }))
-                }
-              />
-            </Field>
-            <Field label="Content exclusions">
-              <Input
-                value={(laneCreative.contentExclusions ?? []).join(', ')}
-                onChange={(e) =>
-                  setLaneCreative((prev) => ({
-                    ...prev,
-                    contentExclusions: e.target.value
-                      .split(',')
-                      .map((s) => s.trim())
-                      .filter(Boolean),
-                  }))
-                }
-                placeholder="Comma-separated exclusions"
-              />
-            </Field>
-            <Button
-              size="sm"
-              disabled={saveLane.isPending}
-              onClick={() => {
-                const lane = (lanesQuery.data ?? []).find((l) => l.id === laneCreativeId);
-                if (lane) saveLane.mutate(lane);
-              }}
-            >
-              Save lane creative
-            </Button>
-          </div>
-        ) : null}
-      </section>
+      {tab !== 'lanes' ? (
+        <div className="sticky bottom-4 z-20 flex items-center justify-between gap-3 rounded-xl border border-border bg-card/95 px-4 py-3 shadow-lg backdrop-blur">
+          <p className="hidden text-sm text-muted-foreground sm:block">
+            Changes on this tab save together.
+          </p>
+          <Button className="ml-auto" disabled={saveConfig.isPending} onClick={() => saveConfig.mutate()}>
+            {saveConfig.isPending ? 'Saving…' : 'Save Series settings'}
+          </Button>
+        </div>
+      ) : null}
     </div>
   );
 }

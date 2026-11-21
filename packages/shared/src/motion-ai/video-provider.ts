@@ -26,6 +26,20 @@ export interface ImageToVideoSubmitInput {
   lastFrameUrl?: string;
   /** Hailuo prompt optimizer (default true when supported) */
   promptOptimizer?: boolean;
+  /** xAI / cinematic providers: output aspect ratio (ignored for I2V when image dictates aspect). */
+  aspectRatio?: string;
+}
+
+/** Text-to-video submit input (xAI Grok Imagine Video and future T2V providers). */
+export interface TextToVideoSubmitInput {
+  prompt: string;
+  durationSeconds: number;
+  resolution: string;
+  aspectRatio?: string;
+  model?: string;
+  externalTaskId?: string;
+  /** Prefer native dialogue/scene audio when the provider supports it. */
+  audio?: 'off' | 'native';
 }
 
 export interface ImageToVideoSubmitResult {
@@ -67,8 +81,8 @@ export interface RetrievedVideo {
 }
 
 /**
- * Provider-agnostic image-to-video adapter.
- * Concrete providers (Kling, future vendors) implement this contract.
+ * Provider-agnostic video adapter.
+ * Hailuo/Kling implement image-to-video; xAI implements T2V + I2V.
  */
 export interface VideoGenerationProvider {
   readonly name: string;
@@ -77,6 +91,9 @@ export interface VideoGenerationProvider {
   getModel(): string;
   estimateCost(durationSeconds: number, resolution: string): number;
   submitImageToVideo(input: ImageToVideoSubmitInput): Promise<ImageToVideoSubmitResult>;
+  /** Optional text-to-video. Providers that only support I2V omit this. */
+  supportsTextToVideo?(): boolean;
+  submitTextToVideo?(input: TextToVideoSubmitInput): Promise<ImageToVideoSubmitResult>;
   getTaskStatus(providerTaskId: string): Promise<VideoProviderTaskStatusResult>;
   retrieveCompletedVideo(result: VideoProviderTaskStatusResult): Promise<RetrievedVideo>;
   cancelTask?(providerTaskId: string): Promise<boolean>;

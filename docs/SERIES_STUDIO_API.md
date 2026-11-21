@@ -11,7 +11,17 @@
 | Method | Path | Purpose |
 | --- | --- | --- |
 | GET | `/series/config` | Get or create Series config (includes `creativeSettings`, `autonomyMode`, effective approval flags) |
-| PATCH | `/series/config` | Update feature switches / budgets / global creative settings / `autonomyMode` |
+| PATCH | `/series/config` | Update feature switches / budgets / duration levels / global creative settings / `autonomyMode` |
+
+### Duration levels (do not confuse)
+
+| Setting | Meaning | Default |
+| --- | --- | --- |
+| `defaultStoryDurationSeconds` | Complete movie/story runtime | `null` (legacy: count × episode) |
+| `defaultEpisodeDurationSeconds` | Individual episode runtime | `60` |
+| `defaultMaxClipDurationSeconds` | Max Grok Lite clip length | `15` |
+| `defaultProductionFormat` | `episodic` \| `standalone` | `episodic` |
+| `defaultPlannedEpisodeCount` | Fallback episode count when story duration is unset | `10` |
 
 ### Autonomy mode
 
@@ -104,8 +114,15 @@ Body (optional): `{ useMockAi?, customPremise?, useCustomIdea? }`
 | POST | `/series/:id/approve` | Approve series / bible |
 | POST | `/series/:id/reject` | Reject series |
 | GET | `/series/:id/characters` | Characters + refs |
+| GET | `/series/:id/characters/:characterId` | One character + identity profile |
+| PATCH | `/series/:id/characters/:characterId/identity` | Update identity fields (bumps version, clears approval) |
+| POST | `/series/:id/characters/:characterId/approve-identity` | Approve locked identity |
+| POST | `/series/:id/characters/approve-identities` | Approve all identities |
+| POST | `/series/:id/characters/validate-clip` | Validate characters for clip production |
 | POST | `/series/:id/characters/references` | Generate missing portraits |
 | POST | `/series/:id/characters/:characterId/references` | One portrait |
+| POST | `/series/:id/characters/references/:assetId/approve` | Approve portrait |
+| POST | `/series/:id/characters/references/:assetId/primary` | Set primary portrait |
 | GET | `/series/:id/continuity` | Snapshots + memory |
 
 ## Episodes

@@ -12,12 +12,12 @@ import {
 
 export class GenerateSceneMotionDto {
   @ApiPropertyOptional({
-    enum: ['hailuo', 'kling'],
+    enum: ['hailuo', 'kling', 'xai'],
     description: 'Video generation provider (default: VIDEO_GENERATION_PROVIDER / hailuo)',
   })
   @IsOptional()
-  @IsIn(['hailuo', 'kling'])
-  provider?: 'hailuo' | 'kling';
+  @IsIn(['hailuo', 'kling', 'xai'])
+  provider?: 'hailuo' | 'kling' | 'xai';
 
   @ApiPropertyOptional({ enum: [5, 6, 10] })
   @IsOptional()

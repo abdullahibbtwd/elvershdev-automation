@@ -344,6 +344,7 @@ model User {
   lipSyncJobs                 LipSyncJob[]
   episodeDialogueLines        EpisodeDialogueLine[]
   episodeShots                EpisodeShot[]
+  episodeVideoClips           EpisodeVideoClip[]
   episodeAudioMixes           EpisodeAudioMix[]
 
   @@index([email])
@@ -750,6 +751,7 @@ model MediaAsset {
   dialogueLineAudioAssets   EpisodeDialogueLine[]      @relation("DialogueLineAudio")
   episodeShotStills         EpisodeShot[]              @relation("EpisodeShotStill")
   episodeShotVideos         EpisodeShot[]              @relation("EpisodeShotVideo")
+  episodeVideoClips         EpisodeVideoClip[]         @relation("EpisodeVideoClipMedia")
   episodeAudioMixAssets     EpisodeAudioMix[]          @relation("EpisodeAudioMixAsset")
   episodeSubtitleAssets     EpisodeAudioMix[]          @relation("EpisodeSubtitleAsset")
 
@@ -1839,6 +1841,19 @@ enum EpisodeShotStatus {
   FAILED
 }
 
+/// Grok Lite generation unit (≤15s). Distinct from EpisodeShot (screenplay coverage).
+enum EpisodeVideoClipStatus {
+  PLANNED
+  QUEUED
+  SUBMITTED
+  GENERATING
+  DOWNLOADING
+  COMPLETED
+  FAILED
+  RETRYING
+  CANCELLED
+}
+
 enum SeriesProductionRunStatus {
   PENDING
   RUNNING
@@ -1902,7 +1917,14 @@ model SeriesAutomationConfig {
   defaultProductionStartMode      SeriesProductionStartMode @default(NEXT_WINDOW) @map("default_production_start_mode")
   defaultProductionLeadTimeMinutes Int              @default(240) @map("default_production_lead_time_minutes")
   defaultPlannedEpisodeCount      Int               @default(10) @map("default_planned_episode_count")
+  /// Individual episode duration default (60s). Not complete-story or clip duration.
   defaultEpisodeDurationSeconds   Int               @default(60) @map("default_episode_duration_seconds")
+  /// Complete story/movie duration default. Null = derive from episode count × episode duration (legacy).
+  defaultStoryDurationSeconds     Int?              @map("default_story_duration_seconds")
+  /// Max seconds per Grok Lite clip (≤15). Independent from episode/story duration.
+  defaultMaxClipDurationSeconds   Int               @default(15) @map("default_max_clip_duration_seconds")
+  /// episodic = multiple episodes; standalone = one movie-length unit.
+  defaultProductionFormat         String            @default("episodic") @map("default_production_format")
   defaultReplacementTriggerEpisode Int              @default(8) @map("default_replacement_trigger_episode")
   maxConcurrentEpisodeProduction  Int               @default(1) @map("max_concurrent_episode_production")
   maxRetries                      Int               @default(3) @map("max_retries")
@@ -1948,7 +1970,12 @@ model SeriesLane {
   customProductionStartAt    DateTime?        @map("custom_production_start_at")
   activeSeriesId             String?          @unique @map("active_series_id")
   plannedEpisodeCount        Int              @default(10) @map("planned_episode_count")
+  /// Individual episode duration (default 60s). Not complete-story or clip duration.
   targetEpisodeDurationSeconds Int            @default(60) @map("target_episode_duration_seconds")
+  /// Complete story/movie duration. Null = derive from count × episode duration.
+  targetStoryDurationSeconds Int?             @map("target_story_duration_seconds")
+  maxClipDurationSeconds     Int              @default(15) @map("max_clip_duration_seconds")
+  productionFormat           String           @default("episodic") @map("production_format")
   replacementTriggerEpisode  Int              @default(8) @map("replacement_trigger_episode")
   currentEpisodeNumber       Int              @default(0) @map("current_episode_number")
   lastPublishedEpisodeNumber Int              @default(0) @map("last_published_episode_number")
@@ -2029,7 +2056,12 @@ model StorySeries {
   visualStyle                String?              @map("visual_style") @db.Text
   language                   String               @default("en")
   tone                       String?
+  /// Individual episode duration (default 60s). Not complete-story or clip duration.
   targetEpisodeDurationSeconds Int                @default(60) @map("target_episode_duration_seconds")
+  /// Complete story/movie duration for this series.
+  targetStoryDurationSeconds Int?                 @map("target_story_duration_seconds")
+  maxClipDurationSeconds     Int                  @default(15) @map("max_clip_duration_seconds")
+  productionFormat           String               @default("episodic") @map("production_format")
   plannedEpisodeCount        Int                  @default(10) @map("planned_episode_count")
   currentEpisodeNumber       Int                  @default(0) @map("current_episode_number")
   status                     StorySeriesStatus    @default(DRAFT)
@@ -2104,6 +2136,8 @@ model SeriesCharacter {
   role                       SeriesCharacterRole     @default(SUPPORTING)
   species                    String                  @default("human")
   ageRange                   String?                 @map("age_range")
+  genderPresentation         String?                 @map("gender_presentation")
+  skinTone                   String?                 @map("skin_tone")
   personality                String                  @db.Text
   motivation                 String                  @db.Text
   backstory                  String                  @db.Text
@@ -2111,7 +2145,9 @@ model SeriesCharacter {
   facialStructure            String?                 @map("facial_structure") @db.Text
   eyeColor                   String?                 @map("eye_color")
   eyeShape                   String?                 @map("eye_shape")
+  hairstyle                  String?
   hairFurColor               String?                 @map("hair_fur_color")
+  facialHair                 String?                 @map("facial_hair")
   markings                   String?                 @db.Text
   bodyProportions            String?                 @map("body_proportions") @db.Text
   clothing                   String?                 @db.Text
@@ -2213,6 +2249,7 @@ model SeriesEpisode {
   productionRuns      SeriesProductionRun[]
   dialogueLines       EpisodeDialogueLine[]
   shots               EpisodeShot[]
+  videoClips          EpisodeVideoClip[]
   audioMixes          EpisodeAudioMix[]
   lipSyncJobs         LipSyncJob[]
 
@@ -2535,6 +2572,58 @@ model EpisodeShot {
   @@index([status])
   @@index([requiresLipSync])
   @@map("episode_shots")
+}
+
+/// One Grok Imagine Video 1.5 Lite generation request (≤15s). Built from one or more EpisodeShots.
+model EpisodeVideoClip {
+  id                   String                 @id @default(uuid())
+  userId               String                 @map("user_id")
+  episodeId            String                 @map("episode_id")
+  clipIndex            Int                    @map("clip_index")
+  sceneOrder           Int                    @map("scene_order")
+  /// Screenplay shot orders covered by this clip (JSON number[]).
+  shotOrders           Json                   @default("[]") @map("shot_orders")
+  /// EpisodeShot ids covered by this clip (JSON string[]).
+  sourceShotIds        Json                   @default("[]") @map("source_shot_ids")
+  durationSeconds      Float                  @map("duration_seconds")
+  startOffsetSeconds   Float                  @default(0) @map("start_offset_seconds")
+  endOffsetSeconds     Float                  @default(0) @map("end_offset_seconds")
+  characters           Json                   @default("[]")
+  speakerName          String?                @map("speaker_name")
+  dialogue             String?                @db.Text
+  location             String?                @db.Text
+  environment          String?                @db.Text
+  camera               String?                @db.Text
+  action               String?                @db.Text
+  audioDirection       String?                @map("audio_direction") @db.Text
+  musicDirection       String?                @map("music_direction") @db.Text
+  previousClipSummary  String?                @map("previous_clip_summary") @db.Text
+  nextClipHint         String?                @map("next_clip_hint") @db.Text
+  prompt               String                 @db.Text
+  continuity           Json                   @default("{}")
+  status               EpisodeVideoClipStatus @default(PLANNED)
+  provider             String?                @default("xai")
+  providerModel        String?                @map("provider_model")
+  providerRequestId    String?                @map("provider_request_id")
+  videoMediaAssetId    String?                @map("video_media_asset_id")
+  estimatedCostUsd     Decimal?               @map("estimated_cost_usd") @db.Decimal(12, 6)
+  actualCostUsd        Decimal?               @map("actual_cost_usd") @db.Decimal(12, 6)
+  idempotencyKey       String?                @unique @map("idempotency_key")
+  errorMessage         String?                @map("error_message") @db.Text
+  metadata             Json                   @default("{}")
+  createdAt            DateTime               @default(now()) @map("created_at")
+  updatedAt            DateTime               @updatedAt @map("updated_at")
+
+  user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  episode         SeriesEpisode @relation(fields: [episodeId], references: [id], onDelete: Cascade)
+  videoMediaAsset MediaAsset?   @relation("EpisodeVideoClipMedia", fields: [videoMediaAssetId], references: [id], onDelete: SetNull)
+
+  @@unique([episodeId, clipIndex])
+  @@index([userId])
+  @@index([episodeId])
+  @@index([status])
+  @@index([providerRequestId])
+  @@map("episode_video_clips")
 }
 
 model LipSyncJob {

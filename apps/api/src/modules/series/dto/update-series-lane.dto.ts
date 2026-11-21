@@ -14,6 +14,7 @@ import {
   MaxLength,
   Min,
   MinLength,
+  ValidateIf,
 } from 'class-validator';
 
 const PRODUCTION_START_MODES = ['IMMEDIATE', 'NEXT_WINDOW', 'CUSTOM', 'MANUAL'] as const;
@@ -59,6 +60,7 @@ export class UpdateSeriesLaneDto {
 
   @ApiPropertyOptional({ example: '04:00', description: 'Optional preferred production start HH:MM' })
   @IsOptional()
+  @ValidateIf((_, value) => value !== null && value !== undefined && value !== '')
   @Matches(/^([01]?\d|2[0-3]):[0-5]\d$/)
   preferredProductionTime?: string | null;
 
@@ -85,8 +87,24 @@ export class UpdateSeriesLaneDto {
   @Type(() => Number)
   @IsInt()
   @Min(15)
-  @Max(600)
+  @Max(1800)
   targetEpisodeDurationSeconds?: number;
+
+  @ApiPropertyOptional({ description: 'Complete story/movie duration for this lane' })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(15)
+  @Max(3600)
+  targetStoryDurationSeconds?: number | null;
+
+  @ApiPropertyOptional({ default: 15, description: 'Max Grok Lite clip seconds (≤15)' })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(15)
+  maxClipDurationSeconds?: number;
 
   @ApiPropertyOptional({ default: 8 })
   @IsOptional()

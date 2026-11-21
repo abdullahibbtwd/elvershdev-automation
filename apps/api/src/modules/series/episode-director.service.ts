@@ -13,6 +13,7 @@ import {
   QUEUE_NAMES,
   SERIES_DEFAULTS,
   SERIES_NOTIFICATION_TYPES,
+  SERIES_DIALOGUE_CREATIVE_DEFAULTS,
   buildCreativeLanguageStyleNotes,
   buildDialogueEpisodeScriptPrompt,
   buildEpisodeScriptPrompt,
@@ -28,6 +29,7 @@ import {
   estimateGeminiCostUsd,
   getGeminiPricingFromEnv,
   isDialogueDrivenCreative,
+  mergeSeriesCreativeSettings,
   normalizeDialogueEpisodeScriptPlanInput,
   normalizeEpisodeScriptPlanInput,
   parseSeriesCreativeSettings,
@@ -40,6 +42,7 @@ import { GeminiProvider } from '../../integrations/providers/gemini.provider';
 import { PrismaService } from '../../prisma/prisma.service';
 import { QueueService } from '../../queue/queue.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { ClipPlanningService } from './clip-planning.service';
 import { ContinuityEngineService } from './continuity-engine.service';
 import { DialogueProductionService } from './dialogue-production.service';
 import { SeriesConfigService } from './series-config.service';
@@ -58,6 +61,7 @@ export class EpisodeDirectorService {
     private readonly queues: QueueService,
     private readonly handoff: SeriesLifecycleHandoffService,
     private readonly dialogueProduction: DialogueProductionService,
+    private readonly clipPlanning: ClipPlanningService,
   ) {}
 
   async getEpisode(userId: string, seriesId: string, episodeId: string) {
@@ -65,6 +69,21 @@ export class EpisodeDirectorService {
       where: { id: episodeId, seriesId, series: { userId } },
       include: {
         scenes: { orderBy: { sceneOrder: 'asc' } },
+        shots: {
+          orderBy: [{ sceneOrder: 'asc' }, { shotOrder: 'asc' }],
+          include: {
+            dialogueLine: {
+              select: {
+                id: true,
+                text: true,
+                speakerName: true,
+                emotion: true,
+                durationSeconds: true,
+              },
+            },
+          },
+        },
+        videoClips: { orderBy: { clipIndex: 'asc' } },
         continuitySnapshots: true,
         memoryEvents: { orderBy: { createdAt: 'asc' } },
       },
@@ -149,9 +168,19 @@ export class EpisodeDirectorService {
       );
       const meta = (episode.metadata ?? {}) as Record<string, unknown>;
       const config = await this.configService.getOrCreate(userId);
-      const creative = this.resolveCreativeSettings(series, config);
+      const lane = series.laneId
+        ? await this.prisma.seriesLane.findFirst({
+            where: { id: series.laneId, userId, deletedAt: null },
+            select: { creativeSettings: true },
+          })
+        : null;
+      const creative = this.resolveCreativeSettings(series, config, lane?.creativeSettings);
       const dialogueDriven = isDialogueDrivenCreative(creative);
-      const languageStyleNotes = this.buildLanguageStyleNotes(series, config);
+      const languageStyleNotes = this.buildLanguageStyleNotes(
+        series,
+        config,
+        lane?.creativeSettings,
+      );
 
       const planInput = {
         seriesTitle: series.title,
@@ -440,7 +469,16 @@ export class EpisodeDirectorService {
       );
     }
 
-    return updated;
+    // Phase 3: build Grok Lite ≤15s clip plan from screenplay shots after approval.
+    try {
+      await this.clipPlanning.planClips(userId, seriesId, episodeId, { force: true });
+    } catch (error) {
+      this.logger.warn(
+        `Clip plan after approval failed episode=${episodeId}: ${(error as Error).message}`,
+      );
+    }
+
+    return this.getEpisode(userId, seriesId, episodeId);
   }
 
   async validateForVisuals(userId: string, seriesId: string, episodeId: string, useMockAi?: boolean) {
@@ -460,10 +498,16 @@ export class EpisodeDirectorService {
   private resolveCreativeSettings(
     series: { metadata?: unknown },
     config: { creativeSettings?: unknown },
+    laneCreativeSettings?: unknown,
   ): SeriesCreativeSettings {
     const seriesMeta = (series.metadata ?? {}) as Record<string, unknown>;
-    return parseSeriesCreativeSettings(
-      seriesMeta.creativeSettingsSnapshot ?? config.creativeSettings ?? {},
+    // Dialogue-first product defaults < global < plan snapshot < current lane
+    // (lane last so enabling Dialogue-driven after Plan Movie fixes script regen).
+    return mergeSeriesCreativeSettings(
+      SERIES_DIALOGUE_CREATIVE_DEFAULTS,
+      parseSeriesCreativeSettings(config.creativeSettings),
+      parseSeriesCreativeSettings(seriesMeta.creativeSettingsSnapshot),
+      parseSeriesCreativeSettings(laneCreativeSettings),
     );
   }
 
@@ -474,8 +518,9 @@ export class EpisodeDirectorService {
       tone?: string | null;
     },
     config: { creativeSettings?: unknown },
+    laneCreativeSettings?: unknown,
   ): string | undefined {
-    const snapshot = this.resolveCreativeSettings(series, config);
+    const snapshot = this.resolveCreativeSettings(series, config, laneCreativeSettings);
     const fromCreative = buildCreativeLanguageStyleNotes(snapshot);
     const extras = [
       series.language ? `Series language: ${series.language}` : null,

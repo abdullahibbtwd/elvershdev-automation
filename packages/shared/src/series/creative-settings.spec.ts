@@ -34,12 +34,18 @@ describe('series creative settings', () => {
         cliffhangerIntensity: 'high',
         episodesPerMovie: 8,
         episodeDurationSeconds: 45,
+        storyDurationSeconds: 600,
+        maxClipDurationSeconds: 15,
+        productionFormat: 'episodic',
       }),
     );
     expect(fields.genre).toBe('Mystery thriller');
     expect(fields.subgenres).toEqual(['Suspense']);
     expect(fields.plannedEpisodeCount).toBe(8);
+    expect(fields.targetStoryDurationSeconds).toBe(600);
+    expect(fields.maxClipDurationSeconds).toBe(15);
     expect(fields.additionalInstructions).toContain('Cliffhanger intensity: high');
+    expect(fields.additionalInstructions).toContain('Complete story/movie duration');
   });
 
   it('keeps theme within Movie Architect max when many themes are selected', () => {
@@ -62,9 +68,23 @@ describe('series creative settings', () => {
     expect(fields.additionalInstructions).toContain('Themes (full):');
   });
 
-  it('keeps narration path unless dialogue is explicitly enabled', () => {
+  it('treats storyConcept as soft inspiration and keeps theme selection-driven', () => {
+    const fields = creativeSettingsToBriefFields(
+      seriesCreativeSettingsSchema.parse({
+        genres: ['Family drama'],
+        themes: ['Sibling rivalry', 'Favouritism'],
+        storyConcept: 'A young boy is mistreated at breakfast.',
+      }),
+    );
+    expect(fields.theme).toBe('Sibling rivalry; Favouritism');
+    expect(fields.theme).not.toContain('mistreated');
+    expect(fields.additionalInstructions).toContain('Optional inspiration seed');
+    expect(fields.additionalInstructions).toMatch(/original.*emotionally engaging|invent an original/i);
+  });
+
+  it('defaults to dialogue-driven; narration only when explicitly disabled', () => {
     expect(isDialogueDrivenCreative(null)).toBe(false);
-    expect(isDialogueDrivenCreative(parseSeriesCreativeSettings({}))).toBe(false);
+    expect(isDialogueDrivenCreative(parseSeriesCreativeSettings({}))).toBe(true);
     expect(
       isDialogueDrivenCreative(
         parseSeriesCreativeSettings({ dialogueDrivenStorytelling: false }),

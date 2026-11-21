@@ -20,9 +20,13 @@ import { EpisodeGenerateDto, EpisodeValidateDto } from './dto/episode-action.dto
 import { GenerateSeriesDto } from './dto/generate-series.dto';
 import { PlanMoviesDto, PrepareNextEpisodesDto } from './dto/plan-movies.dto';
 import { RunAllSeriesNowDto, RunSeriesLaneNowDto } from './dto/run-series-now.dto';
+import { UpdateCharacterIdentityDto } from './dto/update-character-identity.dto';
 import { UpdateSeriesConfigDto } from './dto/update-series-config.dto';
 import { UpdateSeriesLaneDto } from './dto/update-series-lane.dto';
 import { CharacterDirectorService } from './character-director.service';
+import { ClipAssemblyService } from './clip-assembly.service';
+import { ClipGenerationService } from './clip-generation.service';
+import { ClipPlanningService } from './clip-planning.service';
 import { ContinuityEngineService } from './continuity-engine.service';
 import { EpisodeDirectorService } from './episode-director.service';
 import { MovieArchitectService } from './movie-architect.service';
@@ -69,6 +73,9 @@ export class SeriesController {
     private readonly library: SeriesLibraryService,
     private readonly characters: CharacterDirectorService,
     private readonly episodes: EpisodeDirectorService,
+    private readonly clipPlanning: ClipPlanningService,
+    private readonly clipGeneration: ClipGenerationService,
+    private readonly clipAssembly: ClipAssemblyService,
     private readonly continuity: ContinuityEngineService,
     private readonly replacements: SeriesReplacementService,
     private readonly publishScheduler: SeriesPublishSchedulerService,
@@ -167,6 +174,19 @@ export class SeriesController {
     @Param('id', ParseUUIDPipe) id: string,
   ) {
     const data = await this.laneService.softDelete(user.id, id);
+    return { success: true, data };
+  }
+
+  @Post('lanes/:id/reset')
+  @ApiOperation({
+    summary:
+      'Hard-reset a lane: delete all movies/episodes/schedules/executions; keep the lane shell (Morning/Evening safe)',
+  })
+  async resetLane(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    const data = await this.laneService.resetLaneContent(user.id, id);
     return { success: true, data };
   }
 
@@ -317,8 +337,6 @@ export class SeriesController {
         queueHostsOnThisProcess:
           (process.env.PROCESS_ROLE ?? 'all') === 'all' ||
           (process.env.PROCESS_ROLE ?? 'all') === 'scheduler',
-        topologyHint:
-          'api enqueues PLAN_MOVIE; api-scheduler must log "Series queue host listening" or Active movie stays None',
         phase: 'G',
         lockKey: 'cron:series',
         queues: [
@@ -505,6 +523,74 @@ export class SeriesController {
     return { success: true, data };
   }
 
+  @Post(':id/characters/approve-identities')
+  @ApiOperation({ summary: 'Approve all series character identities' })
+  async approveAllCharacterIdentities(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    const data = await this.characters.approveAllIdentities(user.id, id);
+    return { success: true, data };
+  }
+
+  @Post(':id/characters/validate-clip')
+  @ApiOperation({ summary: 'Validate character identity readiness for clip production' })
+  async validateClipCharacters(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body()
+    body: {
+      appearingCharacterNames: string[];
+      requireApproved?: boolean;
+      screenplayClothingByCharacter?: Record<string, string | undefined>;
+      screenplayAppearanceNotesByCharacter?: Record<string, string | undefined>;
+    },
+  ) {
+    const data = await this.characters.validateClipCharacters({
+      userId: user.id,
+      seriesId: id,
+      appearingCharacterNames: body?.appearingCharacterNames ?? [],
+      requireApproved: body?.requireApproved,
+      screenplayClothingByCharacter: body?.screenplayClothingByCharacter,
+      screenplayAppearanceNotesByCharacter: body?.screenplayAppearanceNotesByCharacter,
+    });
+    return { success: true, data };
+  }
+
+  @Get(':id/characters/:characterId')
+  @ApiOperation({ summary: 'Get one series character identity profile' })
+  async getCharacter(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('characterId', ParseUUIDPipe) characterId: string,
+  ) {
+    const data = await this.characters.getCharacter(user.id, id, characterId);
+    return { success: true, data };
+  }
+
+  @Patch(':id/characters/:characterId/identity')
+  @ApiOperation({ summary: 'Update series character identity profile fields' })
+  async updateCharacterIdentity(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('characterId', ParseUUIDPipe) characterId: string,
+    @Body() body: UpdateCharacterIdentityDto,
+  ) {
+    const data = await this.characters.updateIdentity(user.id, id, characterId, body);
+    return { success: true, data };
+  }
+
+  @Post(':id/characters/:characterId/approve-identity')
+  @ApiOperation({ summary: 'Approve locked series character identity' })
+  async approveCharacterIdentity(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('characterId', ParseUUIDPipe) characterId: string,
+  ) {
+    const data = await this.characters.approveIdentity(user.id, id, characterId);
+    return { success: true, data };
+  }
+
   @Get(':id/episodes')
   @ApiOperation({ summary: 'List series episodes (outlines)' })
   async getEpisodes(
@@ -565,6 +651,175 @@ export class SeriesController {
     @Param('episodeId', ParseUUIDPipe) episodeId: string,
   ) {
     const data = await this.episodes.approveEpisode(user.id, id, episodeId);
+    return { success: true, data };
+  }
+
+  @Get(':id/episodes/:episodeId/clip-plan')
+  @ApiOperation({
+    summary: 'Get persisted Grok Lite clip plan (≤15s clips from screenplay shots)',
+  })
+  async getEpisodeClipPlan(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('episodeId', ParseUUIDPipe) episodeId: string,
+  ) {
+    const data = await this.clipPlanning.getClipPlan(user.id, id, episodeId);
+    return { success: true, data };
+  }
+
+  @Post(':id/episodes/:episodeId/clip-plan')
+  @ApiOperation({
+    summary: 'Build and persist a shot-aware ≤15s clip plan for Grok Imagine Video 1.5 Lite',
+  })
+  async planEpisodeClips(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('episodeId', ParseUUIDPipe) episodeId: string,
+    @Body() body: { force?: boolean; persist?: boolean },
+  ) {
+    const data = await this.clipPlanning.planClips(user.id, id, episodeId, {
+      force: body?.force === true,
+      persist: body?.persist !== false,
+    });
+    return { success: true, data };
+  }
+
+  @Post(':id/episodes/:episodeId/clip-plan/estimate')
+  @ApiOperation({ summary: 'Estimate clip count, duration, and Grok Lite cost without persisting' })
+  async estimateEpisodeClipPlan(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('episodeId', ParseUUIDPipe) episodeId: string,
+  ) {
+    const data = await this.clipPlanning.estimateClipPlan(user.id, id, episodeId);
+    return { success: true, data };
+  }
+
+  @Get(':id/episodes/:episodeId/clips')
+  @ApiOperation({ summary: 'Get Grok Lite clip generation status for an episode' })
+  async getEpisodeClips(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('episodeId', ParseUUIDPipe) episodeId: string,
+  ) {
+    const data = await this.clipGeneration.getClipStatus(user.id, id, episodeId);
+    return { success: true, data };
+  }
+
+  @Post(':id/episodes/:episodeId/clips/generate')
+  @ApiOperation({
+    summary: 'Generate all planned episode clips via Grok Imagine Video 1.5 Lite (submit/poll/download)',
+  })
+  async generateEpisodeClips(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('episodeId', ParseUUIDPipe) episodeId: string,
+    @Body()
+    body: {
+      useMockAi?: boolean;
+      force?: boolean;
+      async?: boolean;
+      mode?: 'text_to_video' | 'image_to_video' | 'auto';
+    },
+  ) {
+    const data = await this.clipGeneration.generateEpisodeClips(user.id, id, episodeId, {
+      useMockAi: body?.useMockAi,
+      force: body?.force,
+      async: body?.async !== false,
+      mode: body?.mode ?? 'auto',
+    });
+    return { success: true, data };
+  }
+
+  @Post(':id/episodes/:episodeId/clips/:clipId/generate')
+  @ApiOperation({ summary: 'Generate one episode clip via Grok Lite' })
+  async generateOneEpisodeClip(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('episodeId', ParseUUIDPipe) episodeId: string,
+    @Param('clipId', ParseUUIDPipe) clipId: string,
+    @Body()
+    body: {
+      useMockAi?: boolean;
+      force?: boolean;
+      async?: boolean;
+      mode?: 'text_to_video' | 'image_to_video' | 'auto';
+    },
+  ) {
+    const data = await this.clipGeneration.generateOneClip(user.id, id, episodeId, clipId, {
+      useMockAi: body?.useMockAi,
+      force: body?.force,
+      async: body?.async !== false,
+      mode: body?.mode ?? 'auto',
+    });
+    return { success: true, data };
+  }
+
+  @Post(':id/episodes/:episodeId/clips/:clipId/retry')
+  @ApiOperation({ summary: 'Retry a failed (or completed) clip generation' })
+  async retryEpisodeClip(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('episodeId', ParseUUIDPipe) episodeId: string,
+    @Param('clipId', ParseUUIDPipe) clipId: string,
+    @Body() body: { useMockAi?: boolean; mode?: 'text_to_video' | 'image_to_video' | 'auto' },
+  ) {
+    const data = await this.clipGeneration.generateOneClip(user.id, id, episodeId, clipId, {
+      useMockAi: body?.useMockAi,
+      force: true,
+      async: true,
+      mode: body?.mode ?? 'auto',
+    });
+    return { success: true, data };
+  }
+
+  @Post(':id/episodes/:episodeId/clips/cancel')
+  @ApiOperation({ summary: 'Cancel in-flight Grok Lite clip jobs for an episode' })
+  async cancelEpisodeClips(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('episodeId', ParseUUIDPipe) episodeId: string,
+  ) {
+    const data = await this.clipGeneration.cancelEpisodeClips(user.id, id, episodeId);
+    return { success: true, data };
+  }
+
+  @Get(':id/episodes/:episodeId/assembly')
+  @ApiOperation({
+    summary: 'Assembly readiness: completed Grok clips → FFmpeg concat (narration gate bypassed)',
+  })
+  async getEpisodeAssembly(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('episodeId', ParseUUIDPipe) episodeId: string,
+  ) {
+    const data = await this.clipAssembly.getAssemblyStatus(user.id, id, episodeId);
+    return { success: true, data };
+  }
+
+  @Post(':id/episodes/:episodeId/assemble')
+  @ApiOperation({
+    summary:
+      'Assemble COMPLETED EpisodeVideoClips with FFmpeg (+ optional music bed). Skips narration readiness.',
+  })
+  async assembleEpisode(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('episodeId', ParseUUIDPipe) episodeId: string,
+    @Body()
+    body: {
+      force?: boolean;
+      async?: boolean;
+      backgroundMusicAssetId?: string;
+      musicGainDb?: number;
+    },
+  ) {
+    const data = await this.clipAssembly.enqueueAssemble(user.id, id, episodeId, {
+      force: body?.force === true,
+      async: body?.async !== false,
+      backgroundMusicAssetId: body?.backgroundMusicAssetId,
+      musicGainDb: body?.musicGainDb,
+    });
     return { success: true, data };
   }
 
@@ -692,6 +947,28 @@ export class SeriesController {
       seriesId: id,
       characterId,
     });
+    return { success: true, data };
+  }
+
+  @Post(':id/characters/references/:assetId/approve')
+  @ApiOperation({ summary: 'Approve a character reference portrait' })
+  async approveCharacterReference(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('assetId', ParseUUIDPipe) assetId: string,
+  ) {
+    const data = await this.characters.approveReference(user.id, id, assetId);
+    return { success: true, data };
+  }
+
+  @Post(':id/characters/references/:assetId/primary')
+  @ApiOperation({ summary: 'Set a character reference portrait as primary' })
+  async setPrimaryCharacterReference(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('assetId', ParseUUIDPipe) assetId: string,
+  ) {
+    const data = await this.characters.setPrimaryReference(user.id, id, assetId);
     return { success: true, data };
   }
 }

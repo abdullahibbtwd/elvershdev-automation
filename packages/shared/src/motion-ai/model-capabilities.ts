@@ -1,3 +1,5 @@
+import type { XaiVideoResolution } from './xai-video-request';
+
 export interface KlingModelCapabilities {
   modelId: string;
   submitPath: string;
@@ -166,4 +168,64 @@ export function normalizeHailuoResolution(resolution: string | undefined): Hailu
 export function normalizeHailuoDuration(duration: number | string | undefined): HailuoDuration {
   const value = typeof duration === 'string' ? Number.parseInt(duration, 10) : Number(duration);
   return value === 10 ? 10 : 6;
+}
+
+export interface XaiVideoModelCapabilities {
+  modelId: string;
+  supportedDurations: number[];
+  supportedResolutions: XaiVideoResolution[];
+  supportsTextToVideo: boolean;
+  supportsImageToVideo: boolean;
+  supportsReferenceImages: boolean;
+  supportsVoiceReferences: boolean;
+  supportsNativeAudio: boolean;
+  maxPromptChars: number;
+  maxDurationSeconds: number;
+  defaultDuration: number;
+  defaultResolution: XaiVideoResolution;
+  cancelSupported: boolean;
+}
+
+const XAI_LITE: XaiVideoModelCapabilities = {
+  modelId: 'grok-imagine-video-1.5-lite',
+  supportedDurations: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+  supportedResolutions: ['480p', '720p', '1080p'],
+  supportsTextToVideo: true,
+  supportsImageToVideo: true,
+  supportsReferenceImages: false,
+  supportsVoiceReferences: false,
+  supportsNativeAudio: true,
+  maxPromptChars: 4000,
+  maxDurationSeconds: 15,
+  defaultDuration: 8,
+  defaultResolution: '720p',
+  cancelSupported: false,
+};
+
+export function getXaiVideoModelCapabilities(
+  model?: string,
+  env: Record<string, string | undefined> = {},
+): XaiVideoModelCapabilities {
+  const selected = (model || env.XAI_VIDEO_MODEL || XAI_LITE.modelId).trim();
+  if (selected !== XAI_LITE.modelId) {
+    // Capabilities are defined only for Lite; callers must assert Lite before submit.
+    return { ...XAI_LITE, modelId: selected };
+  }
+  const defaultResolutionRaw = (env.XAI_VIDEO_RESOLUTION ?? '720p').toLowerCase();
+  const defaultResolution: XaiVideoResolution =
+    defaultResolutionRaw === '480p'
+      ? '480p'
+      : defaultResolutionRaw === '1080p'
+        ? '1080p'
+        : '720p';
+  const defaultDurationRaw = Number.parseInt(env.XAI_VIDEO_DEFAULT_DURATION ?? '8', 10);
+  const defaultDuration =
+    Number.isFinite(defaultDurationRaw) && defaultDurationRaw >= 1 && defaultDurationRaw <= 15
+      ? defaultDurationRaw
+      : 8;
+  return {
+    ...XAI_LITE,
+    defaultDuration,
+    defaultResolution,
+  };
 }

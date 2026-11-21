@@ -61,6 +61,7 @@ export function createMockDialogueEpisodeScript(input: {
             requiresLipSync: true,
             ambientSound: 'soft utensil sounds',
             musicDirection: 'barely audible tension',
+            keyProps: [],
           },
           {
             shotOrder: 2,
@@ -80,6 +81,7 @@ export function createMockDialogueEpisodeScript(input: {
             requiresLipSync: true,
             ambientSound: '',
             musicDirection: 'swell slightly',
+            keyProps: [],
           },
           {
             shotOrder: 3,
@@ -99,6 +101,7 @@ export function createMockDialogueEpisodeScript(input: {
             requiresLipSync: true,
             ambientSound: '',
             musicDirection: '',
+            keyProps: [],
           },
           {
             shotOrder: 4,
@@ -118,6 +121,7 @@ export function createMockDialogueEpisodeScript(input: {
             requiresLipSync: false,
             ambientSound: '',
             musicDirection: '',
+            keyProps: [],
           },
         ],
       },
@@ -153,6 +157,7 @@ export function createMockDialogueEpisodeScript(input: {
             requiresLipSync: true,
             ambientSound: '',
             musicDirection: '',
+            keyProps: [],
           },
           {
             shotOrder: 2,
@@ -172,6 +177,7 @@ export function createMockDialogueEpisodeScript(input: {
             requiresLipSync: true,
             ambientSound: '',
             musicDirection: 'emotional swell',
+            keyProps: [],
           },
           {
             shotOrder: 3,
@@ -191,6 +197,7 @@ export function createMockDialogueEpisodeScript(input: {
             requiresLipSync: true,
             ambientSound: 'silence',
             musicDirection: 'hold and fade',
+            keyProps: [],
           },
           {
             shotOrder: 4,
@@ -210,6 +217,7 @@ export function createMockDialogueEpisodeScript(input: {
             requiresLipSync: false,
             ambientSound: '',
             musicDirection: 'soft resolve',
+            keyProps: [],
           },
         ],
       },

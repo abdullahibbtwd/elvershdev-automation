@@ -6,38 +6,30 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
-  AudioGenerationStatus,
-  JobStatus,
-  MotionGenerationStatus,
-  NarrationScriptStatus,
   Prisma,
+  SeriesEpisodeApprovalStatus,
   SeriesEpisodeProductionState,
   SeriesEpisodeStatus,
   SeriesProductionRunStatus,
   VideoRenderStatus,
-  VisualGenerationStatus,
 } from '@prisma/client';
 import {
   QUEUE_NAMES,
   SERIES_DIALOGUE_PRODUCTION_STAGE_ORDER,
   SERIES_NOTIFICATION_TYPES,
-  SERIES_PRODUCTION_STAGE_ORDER,
   bullMqJobId,
   isSeriesStageAutoEnabled,
   nextSeriesDialogueProductionStage,
-  nextSeriesProductionStage,
   type SeriesDialogueProductionStageName,
   type SeriesEpisodeProductionPayload,
   type SeriesProductionStageName,
 } from '@ai-video/shared';
 import { PrismaService } from '../../prisma/prisma.service';
 import { QueueService } from '../../queue/queue.service';
-import { MotionService } from '../motion/motion.service';
-import { NarrationService } from '../narration/narration.service';
 import { NotificationsService } from '../notifications/notifications.service';
-import { RenderingService } from '../rendering/rendering.service';
-import { VisualsService } from '../visuals/visuals.service';
-import { DialogueProductionService } from './dialogue-production.service';
+import { ClipAssemblyService } from './clip-assembly.service';
+import { ClipGenerationService } from './clip-generation.service';
+import { ClipPlanningService } from './clip-planning.service';
 import { SeriesConfigService } from './series-config.service';
 import { SeriesEpisodeQualityService } from './series-episode-quality.service';
 import { SeriesLifecycleHandoffService } from './series-lifecycle-handoff.service';
@@ -70,15 +62,13 @@ export class SeriesOrchestratorService {
     private readonly prisma: PrismaService,
     private readonly configService: SeriesConfigService,
     private readonly adapter: SeriesPipelineAdapterService,
-    private readonly visualsService: VisualsService,
-    private readonly motionService: MotionService,
-    private readonly narrationService: NarrationService,
-    private readonly renderingService: RenderingService,
     private readonly notifications: NotificationsService,
     private readonly queueService: QueueService,
     private readonly handoff: SeriesLifecycleHandoffService,
     private readonly quality: SeriesEpisodeQualityService,
-    private readonly dialogueProduction: DialogueProductionService,
+    private readonly clipPlanning: ClipPlanningService,
+    private readonly clipGeneration: ClipGenerationService,
+    private readonly clipAssembly: ClipAssemblyService,
   ) {}
 
   async startProduction(
@@ -94,17 +84,68 @@ export class SeriesOrchestratorService {
     },
   ) {
     const episode = await this.requireEpisode(userId, seriesId, episodeId);
-    if (episode.status !== SeriesEpisodeStatus.APPROVED && !options?.force) {
-      if (episode.status !== SeriesEpisodeStatus.PRODUCING && episode.status !== SeriesEpisodeStatus.FAILED) {
-        throw new BadRequestException(
-          `Episode must be APPROVED before production (current: ${episode.status})`,
-        );
-      }
+    const approved =
+      episode.approvalStatus === SeriesEpisodeApprovalStatus.APPROVED ||
+      episode.status === SeriesEpisodeStatus.APPROVED ||
+      episode.status === SeriesEpisodeStatus.PRODUCING ||
+      episode.status === SeriesEpisodeStatus.FAILED ||
+      episode.status === SeriesEpisodeStatus.RENDERED;
+    if (!approved && !options?.force) {
+      throw new BadRequestException(
+        `Episode must be approved before production (current: ${episode.status}, approval: ${episode.approvalStatus})`,
+      );
+    }
+    if (!episode.script?.trim()) {
+      throw new BadRequestException('Episode needs an approved screenplay before Produce');
     }
 
     const config = await this.configService.getOrCreate(userId);
     if (!config.seriesStudioEnabled) {
       throw new BadRequestException('Enable Series Studio before producing episodes');
+    }
+
+    // Cancel any stuck fal / narration run so Produce is not blocked on VISUAL_INTELLIGENCE.
+    const activeRuns = await this.prisma.seriesProductionRun.findMany({
+      where: {
+        episodeId,
+        status: {
+          in: [
+            SeriesProductionRunStatus.PENDING,
+            SeriesProductionRunStatus.RUNNING,
+            SeriesProductionRunStatus.RETRYING,
+          ],
+        },
+      },
+      select: { id: true, stage: true, metadata: true },
+    });
+    const falStages = new Set([
+      'VISUAL_INTELLIGENCE',
+      'MOTION_GENERATION',
+      'NARRATION',
+      'SPEECH',
+      'RENDER',
+      'VOICE_ASSIGNMENT',
+      'DIALOGUE_AUDIO',
+      'LIP_SYNC',
+      'AUDIO_MIX',
+    ]);
+    for (const active of activeRuns) {
+      const meta = (active.metadata ?? {}) as Record<string, unknown>;
+      const stageName = active.stage ?? '';
+      const isFal =
+        falStages.has(stageName) ||
+        meta.dialogueDriven !== true ||
+        meta.pipeline !== 'grok_dialogue';
+      if (isFal || options?.force || options?.manualTrigger) {
+        await this.cancelRun(active.id, episodeId);
+        this.logger.warn(
+          `Cancelled stuck production run ${active.id} stage=${stageName} before Grok Produce`,
+        );
+      } else if (!options?.force) {
+        throw new ConflictException(
+          'Production already running for this episode. Cancel it first, or use force.',
+        );
+      }
     }
 
     const concurrent = await this.prisma.seriesEpisode.count({
@@ -128,13 +169,9 @@ export class SeriesOrchestratorService {
     });
     const attemptNumber = (latestAttempt?.attemptNumber ?? 0) + 1;
 
-    const dialogueDriven = await this.dialogueProduction.isDialogueDrivenForEpisode(
-      userId,
-      seriesId,
-    );
-    const initialStage = dialogueDriven
-      ? SERIES_DIALOGUE_PRODUCTION_STAGE_ORDER[0]
-      : SERIES_PRODUCTION_STAGE_ORDER[0];
+    // Series Studio is Grok-only for all lanes (morning / evening / custom).
+    // Never start the legacy fal VISUAL_INTELLIGENCE → Hailuo → narration path.
+    const initialStage = SERIES_DIALOGUE_PRODUCTION_STAGE_ORDER[0];
 
     const run = await this.prisma.seriesProductionRun.create({
       data: {
@@ -149,7 +186,8 @@ export class SeriesOrchestratorService {
           force: options?.force === true,
           // Manual starts may run stages even when automatic stage switches are off.
           manualTrigger: options?.manualTrigger === true || options?.force === true,
-          dialogueDriven,
+          dialogueDriven: true,
+          pipeline: 'grok_dialogue',
         } as Prisma.InputJsonValue,
       },
     });
@@ -202,10 +240,39 @@ export class SeriesOrchestratorService {
 
     const useMockAi = isMockAiEnabled(payload.useMockAi);
     const runMeta = (run.metadata as Record<string, unknown>) ?? {};
-    const dialogueDriven = runMeta.dialogueDriven === true;
-    const stage =
+    let stage =
       (run.stage as SeriesProductionStageName | SeriesDialogueProductionStageName) ||
       'MATERIALIZE';
+
+    // Migrate any in-flight fal/narration run onto the Grok dialogue path.
+    const falOrNarrationStages = new Set<string>([
+      'VISUAL_INTELLIGENCE',
+      'MOTION_GENERATION',
+      'NARRATION',
+      'SPEECH',
+      'RENDER',
+      'VOICE_ASSIGNMENT',
+      'DIALOGUE_AUDIO',
+      'LIP_SYNC',
+      'AUDIO_MIX',
+    ]);
+    if (runMeta.dialogueDriven !== true || falOrNarrationStages.has(stage)) {
+      const migratedStage = falOrNarrationStages.has(stage) ? 'CLIP_GENERATION' : stage;
+      await this.prisma.seriesProductionRun.update({
+        where: { id: run.id },
+        data: {
+          stage: migratedStage,
+          metadata: {
+            ...runMeta,
+            dialogueDriven: true,
+            pipeline: 'grok_dialogue',
+            migratedFromFalPath: falOrNarrationStages.has(stage),
+            migratedFromStage: stage,
+          } as Prisma.InputJsonValue,
+        },
+      });
+      stage = migratedStage as SeriesDialogueProductionStageName;
+    }
 
     try {
       await this.prisma.seriesProductionRun.update({
@@ -233,44 +300,38 @@ export class SeriesOrchestratorService {
       );
       if (stageGate) return stageGate;
 
-      if (dialogueDriven) {
-        switch (stage as SeriesDialogueProductionStageName) {
-          case 'MATERIALIZE':
-            return this.ensureMaterialize(payload, run, useMockAi);
-          case 'VOICE_ASSIGNMENT':
-            return this.ensureDialogueVoiceAssignment(payload, run);
-          case 'VISUAL_INTELLIGENCE':
-            return this.ensureVisuals(payload, run, episode.storyId, useMockAi);
-          case 'DIALOGUE_AUDIO':
-            return this.ensureDialogueAudio(payload, run, useMockAi);
-          case 'LIP_SYNC':
-            return this.ensureLipSync(payload, run, useMockAi);
-          case 'AUDIO_MIX':
-            return this.ensureDialogueAudioMix(payload, run);
-          case 'RENDER':
-            return this.ensureRender(payload, run, episode, useMockAi);
-          case 'DONE':
-            return this.completeDone(run, episode.id);
-          default:
-            throw new Error(`Unknown dialogue production stage: ${stage}`);
-        }
-      }
-
-      switch (stage as SeriesProductionStageName) {
+      // Grok dialogue pipeline only — fal VISUAL_INTELLIGENCE / Hailuo / narration removed from Series.
+      switch (stage as SeriesDialogueProductionStageName) {
         case 'MATERIALIZE':
           return this.ensureMaterialize(payload, run, useMockAi);
-        case 'VISUAL_INTELLIGENCE':
-          return this.ensureVisuals(payload, run, episode.storyId, useMockAi);
-        case 'MOTION_GENERATION':
-          return this.ensureMotion(payload, run, episode.storyId, useMockAi);
-        case 'NARRATION':
-          return this.ensureNarration(payload, run, episode.storyId, useMockAi);
-        case 'SPEECH':
-          return this.ensureSpeech(payload, run, episode.storyId, useMockAi);
-        case 'RENDER':
-          return this.ensureRender(payload, run, episode, useMockAi);
+        case 'CLIP_GENERATION':
+          return this.ensureClipGeneration(payload, run, useMockAi);
+        case 'ASSEMBLY':
+          return this.ensureClipAssembly(payload, run, episode, useMockAi);
         case 'DONE':
           return this.completeDone(run, episode.id);
+        case 'VOICE_ASSIGNMENT':
+        case 'VISUAL_INTELLIGENCE':
+        case 'DIALOGUE_AUDIO':
+        case 'LIP_SYNC':
+        case 'AUDIO_MIX': {
+          await this.completeStage(run.id, stage);
+          await this.enqueueAdvance(
+            payload.userId,
+            payload.seriesId,
+            payload.episodeId,
+            'advance',
+            stagePollDelayMs(500, useMockAi),
+            run.id,
+            useMockAi,
+          );
+          return {
+            skipped: true,
+            reason: 'Grok text-to-video path skips fal stills / TTS / lip-sync',
+            stage,
+            next: 'CLIP_GENERATION',
+          };
+        }
         default:
           throw new Error(`Unknown series production stage: ${stage}`);
       }
@@ -438,378 +499,6 @@ export class SeriesOrchestratorService {
     return { started: true, stage: 'MATERIALIZE', ...materialized };
   }
 
-  private async ensureVisuals(
-    payload: SeriesEpisodeProductionPayload,
-    run: { id: string },
-    storyId: string | null,
-    useMockAi: boolean,
-  ) {
-    if (!storyId) throw new Error('Missing storyId after materialize');
-    const scenes = await this.prisma.storyScene.findMany({
-      where: { storyId },
-      include: {
-        visuals: {
-          where: {
-            generationStatus: VisualGenerationStatus.COMPLETED,
-            generatedImageMediaId: { not: null },
-          },
-        },
-      },
-    });
-    if (scenes.length === 0) throw new Error('No scenes available for visuals');
-
-    if (scenes.every((scene) => scene.visuals.length > 0)) {
-      await this.completeStage(run.id, 'VISUAL_INTELLIGENCE');
-      await this.enqueueAdvance(
-        payload.userId,
-        payload.seriesId,
-        payload.episodeId,
-        'advance',
-        stagePollDelayMs(1000, useMockAi),
-        run.id,
-        useMockAi,
-      );
-      return { completed: true, stage: 'VISUAL_INTELLIGENCE' };
-    }
-
-    const active = await this.prisma.generationJob.findFirst({
-      where: {
-        storyId,
-        jobType: { in: ['VISUAL_ANALYSIS', 'CHARACTER_REFERENCE', 'IMAGE'] },
-        status: { in: [JobStatus.PENDING, JobStatus.QUEUED, JobStatus.PROCESSING] },
-      },
-    });
-    if (active) {
-      await this.enqueueAdvance(
-        payload.userId,
-        payload.seriesId,
-        payload.episodeId,
-        'advance',
-        stagePollDelayMs(6000, useMockAi),
-        run.id,
-        useMockAi,
-      );
-      return { waiting: true, stage: 'VISUAL_INTELLIGENCE' };
-    }
-
-    // Series already projected approved character refs — skip regenerating character portraits.
-    await this.visualsService.generateForStory(payload.userId, storyId, {
-      skipCharacterReferences: true,
-    });
-    await this.enqueueAdvance(
-      payload.userId,
-      payload.seriesId,
-      payload.episodeId,
-      'advance',
-      stagePollDelayMs(6000, useMockAi),
-      run.id,
-      useMockAi,
-    );
-    return { started: true, stage: 'VISUAL_INTELLIGENCE' };
-  }
-
-  private async ensureMotion(
-    payload: SeriesEpisodeProductionPayload,
-    run: { id: string },
-    storyId: string | null,
-    useMockAi: boolean,
-  ) {
-    if (!storyId) throw new Error('Missing storyId');
-    const scenes = await this.prisma.storyScene.findMany({
-      where: { storyId },
-      include: {
-        motionGenerations: {
-          where: {
-            status: MotionGenerationStatus.COMPLETED,
-            outputMediaAssetId: { not: null },
-          },
-        },
-      },
-    });
-    if (scenes.every((scene) => scene.motionGenerations.length > 0)) {
-      await this.completeStage(run.id, 'MOTION_GENERATION');
-      await this.enqueueAdvance(
-        payload.userId,
-        payload.seriesId,
-        payload.episodeId,
-        'advance',
-        stagePollDelayMs(1000, useMockAi),
-        run.id,
-        useMockAi,
-      );
-      return { completed: true, stage: 'MOTION_GENERATION' };
-    }
-
-    const active = await this.prisma.motionGeneration.findFirst({
-      where: {
-        storyId,
-        status: {
-          in: [
-            MotionGenerationStatus.PENDING,
-            MotionGenerationStatus.ANALYZING,
-            MotionGenerationStatus.SUBMITTING,
-            MotionGenerationStatus.PROCESSING,
-            MotionGenerationStatus.DOWNLOADING,
-            MotionGenerationStatus.VALIDATING,
-          ],
-        },
-      },
-    });
-    if (active) {
-      await this.enqueueAdvance(
-        payload.userId,
-        payload.seriesId,
-        payload.episodeId,
-        'advance',
-        stagePollDelayMs(8000, useMockAi),
-        run.id,
-        useMockAi,
-      );
-      return { waiting: true, stage: 'MOTION_GENERATION' };
-    }
-
-    await this.motionService.generateForStory(payload.userId, storyId, {});
-    await this.enqueueAdvance(
-      payload.userId,
-      payload.seriesId,
-      payload.episodeId,
-      'advance',
-      stagePollDelayMs(8000, useMockAi),
-      run.id,
-      useMockAi,
-    );
-    return { started: true, stage: 'MOTION_GENERATION' };
-  }
-
-  private async ensureNarration(
-    payload: SeriesEpisodeProductionPayload,
-    run: { id: string },
-    storyId: string | null,
-    useMockAi: boolean,
-  ) {
-    if (!storyId) throw new Error('Missing storyId');
-    const script = await this.prisma.narrationScript.findFirst({
-      where: {
-        storyId,
-        status: { in: [NarrationScriptStatus.READY, NarrationScriptStatus.APPROVED] },
-      },
-      orderBy: { version: 'desc' },
-    });
-    if (script) {
-      await this.completeStage(run.id, 'NARRATION');
-      await this.enqueueAdvance(
-        payload.userId,
-        payload.seriesId,
-        payload.episodeId,
-        'advance',
-        stagePollDelayMs(1000, useMockAi),
-        run.id,
-        useMockAi,
-      );
-      return { completed: true, stage: 'NARRATION' };
-    }
-
-    const active = await this.prisma.generationJob.findFirst({
-      where: {
-        storyId,
-        jobType: 'NARRATION_PLANNING',
-        status: { in: [JobStatus.PENDING, JobStatus.QUEUED, JobStatus.PROCESSING] },
-      },
-    });
-    if (active) {
-      await this.enqueueAdvance(
-        payload.userId,
-        payload.seriesId,
-        payload.episodeId,
-        'advance',
-        stagePollDelayMs(5000, useMockAi),
-        run.id,
-        useMockAi,
-      );
-      return { waiting: true, stage: 'NARRATION' };
-    }
-
-    await this.narrationService.planNarration(payload.userId, storyId, { useMockAi });
-    await this.enqueueAdvance(
-      payload.userId,
-      payload.seriesId,
-      payload.episodeId,
-      'advance',
-      stagePollDelayMs(5000, useMockAi),
-      run.id,
-      useMockAi,
-    );
-    return { started: true, stage: 'NARRATION' };
-  }
-
-  private async ensureSpeech(
-    payload: SeriesEpisodeProductionPayload,
-    run: { id: string },
-    storyId: string | null,
-    useMockAi: boolean,
-  ) {
-    if (!storyId) throw new Error('Missing storyId');
-    const scenes = await this.prisma.storyScene.findMany({
-      where: { storyId },
-      include: {
-        audioGenerations: {
-          where: {
-            status: AudioGenerationStatus.COMPLETED,
-            audioMediaAssetId: { not: null },
-            isSelected: true,
-          },
-        },
-      },
-    });
-    const ready =
-      scenes.length > 0 && scenes.every((scene) => scene.audioGenerations.length > 0);
-    if (ready) {
-      await this.ensureNarrationApproved(payload.userId, storyId);
-      await this.completeStage(run.id, 'SPEECH');
-      await this.enqueueAdvance(
-        payload.userId,
-        payload.seriesId,
-        payload.episodeId,
-        'advance',
-        stagePollDelayMs(1000, useMockAi),
-        run.id,
-        useMockAi,
-      );
-      return { completed: true, stage: 'SPEECH' };
-    }
-
-    const active = await this.prisma.audioGeneration.findFirst({
-      where: {
-        storyId,
-        status: {
-          in: [
-            AudioGenerationStatus.PENDING,
-            AudioGenerationStatus.GENERATING,
-            AudioGenerationStatus.VALIDATING,
-            AudioGenerationStatus.STORING,
-          ],
-        },
-      },
-    });
-    if (active) {
-      await this.enqueueAdvance(
-        payload.userId,
-        payload.seriesId,
-        payload.episodeId,
-        'advance',
-        stagePollDelayMs(6000, useMockAi),
-        run.id,
-        useMockAi,
-      );
-      return { waiting: true, stage: 'SPEECH' };
-    }
-
-    await this.ensureNarrationApproved(payload.userId, storyId);
-    await this.narrationService.generateStoryAudio(payload.userId, storyId, { useMockAi });
-    await this.enqueueAdvance(
-      payload.userId,
-      payload.seriesId,
-      payload.episodeId,
-      'advance',
-      stagePollDelayMs(6000, useMockAi),
-      run.id,
-      useMockAi,
-    );
-    return { started: true, stage: 'SPEECH' };
-  }
-
-  private async ensureRender(
-    payload: SeriesEpisodeProductionPayload,
-    run: { id: string },
-    episode: {
-      id: string;
-      storyId: string | null;
-      videoRenderId: string | null;
-    },
-    useMockAi: boolean,
-  ) {
-    if (!episode.storyId) throw new Error('Missing storyId');
-
-    if (episode.videoRenderId) {
-      const render = await this.prisma.videoRender.findUnique({
-        where: { id: episode.videoRenderId },
-      });
-      if (render?.status === VideoRenderStatus.COMPLETED && render.outputMediaAssetId) {
-        await this.completeStage(run.id, 'RENDER', { videoRenderId: render.id });
-        await this.enqueueAdvance(
-          payload.userId,
-          payload.seriesId,
-          payload.episodeId,
-          'advance',
-          stagePollDelayMs(500, useMockAi),
-          run.id,
-          useMockAi,
-        );
-        return { completed: true, stage: 'RENDER', videoRenderId: render.id };
-      }
-      if (render) {
-        const terminal: VideoRenderStatus[] = [
-          VideoRenderStatus.FAILED,
-          VideoRenderStatus.CANCELLED,
-          VideoRenderStatus.COMPLETED,
-        ];
-        if (!terminal.includes(render.status)) {
-          await this.enqueueAdvance(
-            payload.userId,
-            payload.seriesId,
-            payload.episodeId,
-            'advance',
-            stagePollDelayMs(8000, useMockAi),
-            run.id,
-            useMockAi,
-          );
-          return { waiting: true, stage: 'RENDER' };
-        }
-        if (render.status === VideoRenderStatus.FAILED) {
-          throw new Error(render.errorMessage ?? 'Render failed');
-        }
-      }
-    }
-
-    await this.ensureNarrationApproved(payload.userId, episode.storyId);
-    const readiness = await this.renderingService.getReadiness(
-      payload.userId,
-      episode.storyId,
-    );
-    if (!readiness.canRender) {
-      await this.enqueueAdvance(
-        payload.userId,
-        payload.seriesId,
-        payload.episodeId,
-        'advance',
-        stagePollDelayMs(8000, useMockAi),
-        run.id,
-        useMockAi,
-      );
-      return { waiting: true, reason: 'Render readiness not met', missing: readiness.missing };
-    }
-
-    const render = await this.renderingService.createRender(
-      payload.userId,
-      episode.storyId,
-      {},
-    );
-    await this.prisma.seriesEpisode.update({
-      where: { id: episode.id },
-      data: { videoRenderId: render.id },
-    });
-    await this.enqueueAdvance(
-      payload.userId,
-      payload.seriesId,
-      payload.episodeId,
-      'advance',
-      stagePollDelayMs(8000, useMockAi),
-      run.id,
-      useMockAi,
-    );
-    return { started: true, stage: 'RENDER', videoRenderId: render.id };
-  }
-
   private async completeDone(run: { id: string }, episodeId: string) {
     const episode = await this.prisma.seriesEpisode.findUniqueOrThrow({
       where: { id: episodeId },
@@ -830,6 +519,7 @@ export class SeriesOrchestratorService {
           status: SeriesEpisodeStatus.RENDERED,
           productionState: SeriesEpisodeProductionState.COMPLETED,
           lastError: null,
+          blockedReason: null,
         },
       }),
     ]);
@@ -839,16 +529,20 @@ export class SeriesOrchestratorService {
       episodeId,
     );
 
-    if (!quality.passed) {
+    const hardFailed = quality.checks.some((c) => c.hard && !c.passed);
+    // Soft score misses (duration slack, etc.) must not wipe a completed Grok assemble —
+    // only hard gates (script/scenes/render/asset/speakers/clips) fail the episode.
+    if (hardFailed) {
+      const failedHard = quality.checks
+        .filter((c) => c.hard && !c.passed)
+        .map((c) => c.id)
+        .join(', ');
       await this.prisma.seriesEpisode.update({
         where: { id: episodeId },
         data: {
           status: SeriesEpisodeStatus.FAILED,
           productionState: SeriesEpisodeProductionState.FAILED,
-          lastError: `Quality check failed (score=${quality.score.toFixed(2)}, threshold=${quality.threshold.toFixed(2)}; failed: ${quality.checks
-            .filter((c) => !c.passed)
-            .map((c) => c.id)
-            .join(', ') || 'none'})`,
+          lastError: `Quality check failed (hard: ${failedHard || 'unknown'}; score=${quality.score.toFixed(2)})`,
           blockedReason: quality.blockedReason ?? 'quality_check_failed',
         },
       });
@@ -856,7 +550,7 @@ export class SeriesOrchestratorService {
         userId: episode.series.userId,
         type: SERIES_NOTIFICATION_TYPES.PRODUCTION_FAILED,
         title: 'Episode failed quality check',
-        body: `Episode ${episode.episodeNumber} render completed but failed automated quality validation.`,
+        body: `Episode ${episode.episodeNumber} render completed but failed a required quality gate.`,
         dedupeKey: `series-quality-fail:${episode.id}:${run.id}`,
         metadata: { episodeId, quality },
       });
@@ -884,22 +578,6 @@ export class SeriesOrchestratorService {
     }
 
     return { completed: true, stage: 'DONE', episodeId, quality };
-  }
-
-  private async ensureNarrationApproved(userId: string, storyId: string) {
-    const script = await this.prisma.narrationScript.findFirst({
-      where: {
-        userId,
-        storyId,
-        status: { in: [NarrationScriptStatus.READY, NarrationScriptStatus.APPROVED] },
-      },
-      orderBy: { version: 'desc' },
-    });
-    if (!script) {
-      throw new Error('Narration script is not ready for automated render approval');
-    }
-    if (script.status === NarrationScriptStatus.APPROVED) return script;
-    return this.narrationService.approveScript(userId, script.id);
   }
 
   /**
@@ -959,6 +637,15 @@ export class SeriesOrchestratorService {
         enabled: config.automaticNarration,
         setting: 'automaticNarration',
       },
+      CLIP_GENERATION: {
+        // Grok T2V does not use Hailuo/Kling motion — only the production master switch.
+        enabled: true,
+        setting: 'automaticEpisodeProduction',
+      },
+      ASSEMBLY: {
+        enabled: config.automaticRendering,
+        setting: 'automaticRendering',
+      },
       RENDER: {
         enabled: config.automaticRendering,
         setting: 'automaticRendering',
@@ -1009,106 +696,117 @@ export class SeriesOrchestratorService {
     };
   }
 
-  private async ensureDialogueVoiceAssignment(
-    payload: SeriesEpisodeProductionPayload,
-    run: { id: string },
-  ) {
-    await this.dialogueProduction.ensureVoiceAssignment(payload.userId, payload.seriesId);
-    await this.completeStage(run.id, 'VOICE_ASSIGNMENT' as SeriesProductionStageName);
-    await this.enqueueAdvance(
-      payload.userId,
-      payload.seriesId,
-      payload.episodeId,
-      'advance',
-      stagePollDelayMs(500, false),
-      run.id,
-      payload.useMockAi,
-    );
-    return { completed: true, stage: 'VOICE_ASSIGNMENT' };
-  }
-
-  private async ensureDialogueAudio(
+  /**
+   * Phase 4/5: ensure clip plan exists and all Grok Lite clips are COMPLETED.
+   * Does not use narration readiness.
+   */
+  private async ensureClipGeneration(
     payload: SeriesEpisodeProductionPayload,
     run: { id: string },
     useMockAi: boolean,
   ) {
-    const lines = await this.prisma.episodeDialogueLine.findMany({
-      where: { episodeId: payload.episodeId, userId: payload.userId },
+    let clips = await this.prisma.episodeVideoClip.findMany({
+      where: { episodeId: payload.episodeId },
+      select: {
+        id: true,
+        status: true,
+        videoMediaAssetId: true,
+        action: true,
+        dialogue: true,
+      },
     });
-    if (lines.length === 0) {
-      throw new Error('No dialogue lines materialized for DIALOGUE_AUDIO stage');
+
+    const plannedOnly = clips.every(
+      (c) => c.status === 'PLANNED' || c.status === 'FAILED' || c.status === 'CANCELLED',
+    );
+    const duplicateActions =
+      plannedOnly &&
+      clips.length >= 2 &&
+      clips.some((a, i) =>
+        clips.slice(i + 1).some(
+          (b) =>
+            (a.action || '').trim() &&
+            (a.action || '').trim().toLowerCase() === (b.action || '').trim().toLowerCase(),
+        ),
+      );
+    // Old literary fallback buried speech in ACTION with empty DIALOGUE — Grok then skipped lines.
+    const missingSpokenDialogue =
+      plannedOnly &&
+      clips.length > 0 &&
+      clips.every((c) => !(c.dialogue || '').trim()) &&
+      clips.some((c) =>
+        /\b(who is|will you|i'm done|marry me|claire|elena|leo)\b/i.test(c.action || ''),
+      );
+
+    if (clips.length === 0 || duplicateActions || missingSpokenDialogue) {
+      try {
+        await this.clipPlanning.planClips(
+          payload.userId,
+          payload.seriesId,
+          payload.episodeId,
+          { force: true },
+        );
+      } catch (error) {
+        throw new Error(
+          `Clip plan required before CLIP_GENERATION: ${(error as Error).message}`,
+        );
+      }
+      clips = await this.prisma.episodeVideoClip.findMany({
+        where: { episodeId: payload.episodeId },
+        select: {
+          id: true,
+          status: true,
+          videoMediaAssetId: true,
+          action: true,
+          dialogue: true,
+        },
+      });
     }
 
-    // Enqueue dedicated dialogue-audio worker job; poll until lines leave AUDIO_PENDING.
-    const pending = lines.filter((l) => l.status === 'AUDIO_PENDING' || l.status === 'DRAFT');
-    if (pending.length > 0) {
-      await this.queueService.getQueue(QUEUE_NAMES.SERIES_DIALOGUE_AUDIO).add(
-        'dialogue_audio',
-        {
-          userId: payload.userId,
-          seriesId: payload.seriesId,
-          episodeId: payload.episodeId,
-          productionRunId: run.id,
-          useMockAi,
-        },
-        { jobId: bullMqJobId('series-dialogue-audio', payload.episodeId, run.id) },
-      );
+    const completed = clips.filter(
+      (c) => c.status === 'COMPLETED' && c.videoMediaAssetId,
+    );
+    if (clips.length > 0 && completed.length === clips.length) {
+      await this.completeStage(run.id, 'CLIP_GENERATION');
       await this.enqueueAdvance(
         payload.userId,
         payload.seriesId,
         payload.episodeId,
         'advance',
-        stagePollDelayMs(5000, useMockAi),
+        stagePollDelayMs(500, useMockAi),
         run.id,
         useMockAi,
       );
-      return { waiting: true, stage: 'DIALOGUE_AUDIO', pending: pending.length };
+      return {
+        completed: true,
+        stage: 'CLIP_GENERATION',
+        clipCount: clips.length,
+      };
     }
 
-    await this.completeStage(run.id, 'DIALOGUE_AUDIO' as SeriesProductionStageName);
-    await this.enqueueAdvance(
-      payload.userId,
-      payload.seriesId,
-      payload.episodeId,
-      'advance',
-      stagePollDelayMs(500, useMockAi),
-      run.id,
-      useMockAi,
-    );
-    return { completed: true, stage: 'DIALOGUE_AUDIO' };
-  }
+    const failed = clips.filter((c) => c.status === 'FAILED');
+    if (failed.length > 0 && failed.length === clips.length - completed.length) {
+      // All remaining failed — surface error
+      throw new Error(
+        `CLIP_GENERATION failed for ${failed.length} clip(s). Retry clip generation.`,
+      );
+    }
 
-  private async ensureLipSync(
-    payload: SeriesEpisodeProductionPayload,
-    run: { id: string },
-    useMockAi: boolean,
-  ) {
-    await this.dialogueProduction.createLipSyncJobs(
-      payload.userId,
-      payload.episodeId,
+    const pending = clips.filter(
+      (c) => c.status !== 'COMPLETED' || !c.videoMediaAssetId,
     );
-    await this.queueService.getQueue(QUEUE_NAMES.SERIES_LIP_SYNC).add(
-      'lip_sync',
-      {
-        userId: payload.userId,
-        seriesId: payload.seriesId,
-        episodeId: payload.episodeId,
-        productionRunId: run.id,
-        useMockAi,
-      },
-      { jobId: bullMqJobId('series-lip-sync', payload.episodeId, run.id) },
-    );
-
-    const required = await this.prisma.episodeShot.count({
-      where: { episodeId: payload.episodeId, requiresLipSync: true },
-    });
-    const completed = await this.prisma.lipSyncJob.count({
-      where: {
-        episodeId: payload.episodeId,
-        status: 'COMPLETED',
-      },
-    });
-    if (required > 0 && completed < required) {
+    if (pending.length > 0) {
+      await this.clipGeneration.generateEpisodeClips(
+        payload.userId,
+        payload.seriesId,
+        payload.episodeId,
+        {
+          useMockAi,
+          async: true,
+          force: false,
+          mode: 'auto',
+        },
+      );
       await this.enqueueAdvance(
         payload.userId,
         payload.seriesId,
@@ -1118,10 +816,122 @@ export class SeriesOrchestratorService {
         run.id,
         useMockAi,
       );
-      return { waiting: true, stage: 'LIP_SYNC', required, completed };
+      return {
+        waiting: true,
+        stage: 'CLIP_GENERATION',
+        completed: completed.length,
+        pending: pending.length,
+      };
     }
 
-    await this.completeStage(run.id, 'LIP_SYNC' as SeriesProductionStageName);
+    await this.completeStage(run.id, 'CLIP_GENERATION');
+    await this.enqueueAdvance(
+      payload.userId,
+      payload.seriesId,
+      payload.episodeId,
+      'advance',
+      stagePollDelayMs(500, useMockAi),
+      run.id,
+      useMockAi,
+    );
+    return { completed: true, stage: 'CLIP_GENERATION' };
+  }
+
+  /**
+   * Phase 5: FFmpeg-assemble COMPLETED clips into VideoRender.
+   * Bypasses narration gate (no ensureNarrationApproved / RenderingService readiness).
+   */
+  private async ensureClipAssembly(
+    payload: SeriesEpisodeProductionPayload,
+    run: { id: string },
+    episode: {
+      id: string;
+      storyId: string | null;
+      videoRenderId: string | null;
+    },
+    useMockAi: boolean,
+  ) {
+    if (episode.videoRenderId) {
+      const render = await this.prisma.videoRender.findUnique({
+        where: { id: episode.videoRenderId },
+      });
+      if (render?.status === VideoRenderStatus.COMPLETED && render.outputMediaAssetId) {
+        const settings = (render.renderSettings ?? {}) as Record<string, unknown>;
+        const assembledIds = Array.isArray(settings.clipIds)
+          ? [...(settings.clipIds as string[])].sort()
+          : [];
+        const currentIds = (
+          await this.prisma.episodeVideoClip.findMany({
+            where: {
+              episodeId: episode.id,
+              status: 'COMPLETED',
+              videoMediaAssetId: { not: null },
+            },
+            select: { id: true },
+          })
+        )
+          .map((c) => c.id)
+          .sort();
+        const clipsMatch =
+          assembledIds.length > 0 &&
+          assembledIds.length === currentIds.length &&
+          assembledIds.every((id, i) => id === currentIds[i]);
+        // Only reuse the old render when it was built from these exact clips.
+        if (
+          clipsMatch &&
+          (settings.source === 'clip_assembly' || settings.dialogueDriven === true)
+        ) {
+          await this.completeStage(run.id, 'ASSEMBLY', { videoRenderId: render.id });
+          await this.enqueueAdvance(
+            payload.userId,
+            payload.seriesId,
+            payload.episodeId,
+            'advance',
+            stagePollDelayMs(500, useMockAi),
+            run.id,
+            useMockAi,
+          );
+          return { completed: true, stage: 'ASSEMBLY', videoRenderId: render.id };
+        }
+      }
+    }
+
+    const status = await this.clipAssembly.getAssemblyStatus(
+      payload.userId,
+      payload.seriesId,
+      payload.episodeId,
+    );
+    if (!status.readyToAssemble) {
+      await this.enqueueAdvance(
+        payload.userId,
+        payload.seriesId,
+        payload.episodeId,
+        'advance',
+        stagePollDelayMs(5000, useMockAi),
+        run.id,
+        useMockAi,
+      );
+      return {
+        waiting: true,
+        stage: 'ASSEMBLY',
+        reason: 'Clips not ready',
+        missing: status.missingClips,
+      };
+    }
+
+    // Run FFmpeg in-process (no narration gate). Always force when we reach here so a
+    // stale 2-clip render cannot block the new dialogue packs.
+    const assembled = await this.clipAssembly.assemble(
+      payload.userId,
+      payload.seriesId,
+      payload.episodeId,
+      { force: true },
+    );
+
+    await this.completeStage(run.id, 'ASSEMBLY', {
+      videoRenderId: assembled.videoRenderId,
+      outputMediaAssetId: assembled.outputMediaAssetId,
+    });
     await this.enqueueAdvance(
       payload.userId,
       payload.seriesId,
@@ -1133,68 +943,10 @@ export class SeriesOrchestratorService {
     );
     return {
       completed: true,
-      stage: 'LIP_SYNC',
-      required,
-      lipSyncCompleted: completed,
+      stage: 'ASSEMBLY',
+      videoRenderId: assembled.videoRenderId,
+      durationSeconds: assembled.durationSeconds,
     };
-  }
-
-  private async ensureDialogueAudioMix(
-    payload: SeriesEpisodeProductionPayload,
-    run: { id: string },
-  ) {
-    const lines = await this.prisma.episodeDialogueLine.findMany({
-      where: { episodeId: payload.episodeId },
-      orderBy: [{ sceneOrder: 'asc' }, { shotOrder: 'asc' }, { lineOrder: 'asc' }],
-    });
-    const cueSheet = lines.map((line) => ({
-      speaker: line.speakerName,
-      text: line.text,
-      startMs: line.startMs,
-      endMs: line.endMs,
-      audioMediaAssetId: line.audioMediaAssetId,
-    }));
-    const subtitleCues = lines.map((line) => ({
-      speaker: line.speakerName,
-      text: line.text,
-      startMs: line.startMs ?? 0,
-      endMs: line.endMs ?? 0,
-    }));
-
-    await this.prisma.episodeAudioMix.upsert({
-      where: {
-        episodeId_version: { episodeId: payload.episodeId, version: 1 },
-      },
-      create: {
-        userId: payload.userId,
-        episodeId: payload.episodeId,
-        version: 1,
-        status: 'READY',
-        dialogueGainDb: 0,
-        musicGainDb: -12,
-        ambientGainDb: -18,
-        cueSheet: cueSheet as unknown as Prisma.InputJsonValue,
-        subtitleCues: subtitleCues as unknown as Prisma.InputJsonValue,
-        idempotencyKey: `${payload.episodeId}:audio-mix:1`,
-      },
-      update: {
-        status: 'READY',
-        cueSheet: cueSheet as unknown as Prisma.InputJsonValue,
-        subtitleCues: subtitleCues as unknown as Prisma.InputJsonValue,
-      },
-    });
-
-    await this.completeStage(run.id, 'AUDIO_MIX' as SeriesProductionStageName);
-    await this.enqueueAdvance(
-      payload.userId,
-      payload.seriesId,
-      payload.episodeId,
-      'advance',
-      stagePollDelayMs(500, false),
-      run.id,
-      payload.useMockAi,
-    );
-    return { completed: true, stage: 'AUDIO_MIX', cues: cueSheet.length };
   }
 
   private async completeStage(
@@ -1206,10 +958,9 @@ export class SeriesOrchestratorService {
       where: { id: runId },
     });
     const priorMeta = (run.metadata as Record<string, unknown>) ?? {};
-    const dialogueDriven = priorMeta.dialogueDriven === true;
-    const next = dialogueDriven
-      ? nextSeriesDialogueProductionStage(stage as SeriesDialogueProductionStageName)
-      : nextSeriesProductionStage(stage as SeriesProductionStageName);
+    const next = nextSeriesDialogueProductionStage(
+      stage as SeriesDialogueProductionStageName,
+    );
     const meta = {
       ...priorMeta,
       ...(extraMeta ?? {}),

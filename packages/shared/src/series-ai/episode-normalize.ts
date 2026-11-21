@@ -44,13 +44,19 @@ export function normalizeEpisodeScriptPlanInput(raw: unknown): unknown {
       ? obj.memory_events
       : [];
 
+  const script = asString(obj.script);
+  const narrationRaw = asString(obj.narrationText ?? obj.narration_text).trim();
+  // Dialogue-style model output often leaves narration empty — keep schema happy and
+  // preserve spoken words via script for legacy consumers / word counts.
+  const narrationText = narrationRaw || script;
+
   return {
     episodeNumber: asNumber(obj.episodeNumber ?? obj.episode_number, 1),
     title: asString(obj.title),
     synopsis: asString(obj.synopsis),
     hook: asString(obj.hook),
-    narrationText: asString(obj.narrationText ?? obj.narration_text),
-    script: asString(obj.script),
+    narrationText,
+    script,
     ending: asString(obj.ending),
     cliffhanger: asString(obj.cliffhanger),
     nextEpisodeSetup: asString(obj.nextEpisodeSetup ?? obj.next_episode_setup),

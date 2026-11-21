@@ -180,7 +180,26 @@ export class FalProvider extends BaseProvider {
       }
     }
 
-    throw lastError instanceof Error ? lastError : new Error('fal.ai image generation failed');
+    throw this.toFalError(lastError);
+  }
+
+  private toFalError(error: unknown): Error {
+    if (axios.isAxiosError(error)) {
+      const status = error.response?.status;
+      const detail =
+        typeof error.response?.data === 'string'
+          ? error.response.data
+          : error.response?.data
+            ? JSON.stringify(error.response.data)
+            : error.message;
+      if (status === 401 || status === 403) {
+        return new Error(
+          `fal.ai rejected the API key (${status}). Check FAL_API_KEY billing/permissions. Detail: ${detail}`,
+        );
+      }
+      return new Error(`fal.ai request failed (${status ?? 'no-status'}): ${detail}`);
+    }
+    return error instanceof Error ? error : new Error('fal.ai image generation failed');
   }
 
   private async submitAndWait(

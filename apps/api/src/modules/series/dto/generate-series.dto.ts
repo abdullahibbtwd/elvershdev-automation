@@ -44,21 +44,53 @@ export class GenerateSeriesDto {
   @MaxLength(200)
   targetAudience?: string;
 
-  @ApiPropertyOptional({ default: 10 })
+  @ApiPropertyOptional({
+    default: 10,
+    description: 'Episode count. Ignored when targetStoryDurationSeconds is set (derived instead).',
+  })
   @IsOptional()
   @Type(() => Number)
   @IsInt()
-  @Min(2)
-  @Max(60)
+  @Min(1)
+  @Max(120)
   plannedEpisodeCount?: number;
 
-  @ApiPropertyOptional({ default: 60 })
+  @ApiPropertyOptional({
+    default: 60,
+    description: 'Individual episode duration in seconds (default 60). Not movie or clip duration.',
+  })
   @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(15)
-  @Max(600)
+  @Max(1800)
   targetEpisodeDurationSeconds?: number;
+
+  @ApiPropertyOptional({
+    description: 'Complete story/movie duration in seconds. Drives episode count with episode duration.',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(15)
+  @Max(3600)
+  targetStoryDurationSeconds?: number;
+
+  @ApiPropertyOptional({
+    default: 15,
+    description: 'Max individual Grok Lite clip duration (≤15). Not episode or movie duration.',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(15)
+  maxClipDurationSeconds?: number;
+
+  @ApiPropertyOptional({ enum: ['episodic', 'standalone'] })
+  @IsOptional()
+  @IsIn(['episodic', 'standalone'])
+  productionFormat?: 'episodic' | 'standalone';
 
   @ApiPropertyOptional()
   @IsOptional()

@@ -1,19 +1,24 @@
-import { SERIES_PRODUCTION_STAGE_ORDER, isSeriesStageAutoEnabled } from '@ai-video/shared';
+import {
+  SERIES_DIALOGUE_PRODUCTION_STAGE_ORDER,
+  SERIES_PRODUCTION_STAGE_ORDER,
+  isSeriesStageAutoEnabled,
+  nextSeriesDialogueProductionStage,
+} from '@ai-video/shared';
 
 describe('SeriesOrchestrator stage gates', () => {
-  it('starts production at MATERIALIZE so characters are projected before visuals', () => {
-    expect(SERIES_PRODUCTION_STAGE_ORDER[0]).toBe('MATERIALIZE');
-    expect(SERIES_PRODUCTION_STAGE_ORDER).toContain('VISUAL_INTELLIGENCE');
-    expect(SERIES_PRODUCTION_STAGE_ORDER.indexOf('MATERIALIZE')).toBeLessThan(
-      SERIES_PRODUCTION_STAGE_ORDER.indexOf('VISUAL_INTELLIGENCE'),
-    );
+  it('uses Grok dialogue stages for all Series lanes (no fal VISUAL_INTELLIGENCE)', () => {
+    expect(SERIES_DIALOGUE_PRODUCTION_STAGE_ORDER).toEqual([
+      'MATERIALIZE',
+      'CLIP_GENERATION',
+      'ASSEMBLY',
+      'DONE',
+    ]);
+    expect(SERIES_DIALOGUE_PRODUCTION_STAGE_ORDER).not.toContain('VISUAL_INTELLIGENCE');
+    expect(nextSeriesDialogueProductionStage('VISUAL_INTELLIGENCE')).toBe('CLIP_GENERATION');
   });
 
-  it('requires render after speech so narration can be auto-approved', () => {
-    const speech = SERIES_PRODUCTION_STAGE_ORDER.indexOf('SPEECH');
-    const render = SERIES_PRODUCTION_STAGE_ORDER.indexOf('RENDER');
-    expect(speech).toBeGreaterThan(-1);
-    expect(render).toBeGreaterThan(speech);
+  it('keeps legacy stage list only for old run-row compatibility', () => {
+    expect(SERIES_PRODUCTION_STAGE_ORDER).toContain('VISUAL_INTELLIGENCE');
   });
 
   it('does not auto-run a disabled stage when master production is on', () => {

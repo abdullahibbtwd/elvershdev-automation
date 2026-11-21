@@ -82,7 +82,16 @@ export class SeriesEpisodeQualityService {
     let durationOk = true;
     let assetOk = false;
 
-    if (!episode.videoRenderId) {
+    const dialogueMeta = (episode.metadata as Record<string, unknown> | null) ?? {};
+    const assemblyMeta =
+      dialogueMeta.assembly && typeof dialogueMeta.assembly === 'object'
+        ? (dialogueMeta.assembly as Record<string, unknown>)
+        : null;
+    const renderId =
+      episode.videoRenderId ??
+      (typeof assemblyMeta?.videoRenderId === 'string' ? assemblyMeta.videoRenderId : null);
+
+    if (!renderId) {
       checks.push({
         id: 'render_row',
         passed: false,
@@ -91,7 +100,7 @@ export class SeriesEpisodeQualityService {
       });
     } else {
       const render = await this.prisma.videoRender.findFirst({
-        where: { id: episode.videoRenderId, userId },
+        where: { id: renderId, userId },
       });
       renderOk = render?.status === VideoRenderStatus.COMPLETED;
       assetOk = Boolean(render?.outputMediaAssetId);
@@ -112,16 +121,21 @@ export class SeriesEpisodeQualityService {
       const actual =
         typeof render?.duration === 'number'
           ? render.duration
-          : episode.actualDurationSeconds;
+          : typeof episode.actualDurationSeconds === 'number'
+            ? episode.actualDurationSeconds
+            : typeof assemblyMeta?.durationSeconds === 'number'
+              ? assemblyMeta.durationSeconds
+              : null;
       if (target && actual) {
         const delta = Math.abs(actual - target);
-        // Soft check — can fail without hard-failing if score still meets threshold.
-        durationOk = delta <= Math.max(20, target * 0.5);
+        // Soft check — short Grok packs (30s) need ±half-target slack so 31s never fails.
+        const allowed = Math.max(target * 0.5, Math.min(20, Math.ceil(target * 0.4)));
+        durationOk = delta <= allowed;
         checks.push({
           id: 'duration_tolerance',
           passed: durationOk,
           hard: false,
-          detail: `actual=${actual}s target=${target}s delta=${delta}s`,
+          detail: `actual=${actual}s target=${target}s delta=${delta}s (allow ±${allowed}s)`,
         });
       } else {
         checks.push({
@@ -133,7 +147,6 @@ export class SeriesEpisodeQualityService {
       }
     }
 
-    const dialogueMeta = (episode.metadata as Record<string, unknown> | null) ?? {};
     if (dialogueMeta.dialogueDriven === true) {
       const dialogueQuality = await this.dialogueProduction.evaluateDialogueQuality(
         userId,

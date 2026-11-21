@@ -4,11 +4,14 @@ import {
   assertVideoProviderSelectable,
   estimateHailuoVideoCostUsd,
   estimateKlingVideoCostUsd,
+  estimateXaiVideoCostUsd,
   getDefaultVideoProviderId,
   getHailuoModelCapabilities,
   getKlingModelCapabilities,
+  getXaiVideoModelCapabilities,
   isHailuoVideoProviderEnabled,
   isKlingVideoProviderEnabled,
+  isXaiVideoProviderEnabled,
   normalizeVideoProviderId,
   type VideoGenerationProvider,
   type VideoProviderAvailability,
@@ -16,6 +19,7 @@ import {
 } from '@ai-video/shared';
 import { HailuoProvider } from '../providers/hailuo.provider';
 import { KlingProvider } from '../providers/kling.provider';
+import { XaiVideoProvider } from '../providers/xai-video.provider';
 
 @Injectable()
 export class VideoProviderRegistry {
@@ -23,6 +27,7 @@ export class VideoProviderRegistry {
     private readonly config: ConfigService,
     private readonly hailuo: HailuoProvider,
     private readonly kling: KlingProvider,
+    private readonly xai: XaiVideoProvider,
   ) {}
 
   getDefaultProviderId(): VideoProviderId {
@@ -31,7 +36,9 @@ export class VideoProviderRegistry {
 
   resolve(provider?: string | null): VideoGenerationProvider {
     const id = normalizeVideoProviderId(provider ?? this.getDefaultProviderId(), process.env);
-    return id === 'kling' ? this.kling : this.hailuo;
+    if (id === 'kling') return this.kling;
+    if (id === 'xai') return this.xai;
+    return this.hailuo;
   }
 
   resolveId(provider?: string | null): VideoProviderId {
@@ -44,7 +51,11 @@ export class VideoProviderRegistry {
 
   listAvailability(): VideoProviderAvailability[] {
     const defaultId = this.getDefaultProviderId();
-    return [this.describe('hailuo', defaultId), this.describe('kling', defaultId)];
+    return [
+      this.describe('hailuo', defaultId),
+      this.describe('kling', defaultId),
+      this.describe('xai', defaultId),
+    ];
   }
 
   estimateCost(
@@ -63,6 +74,20 @@ export class VideoProviderRegistry {
         currency: this.config.get<string>('integrations.hailuoCurrency', 'USD'),
       });
     }
+    if (provider === 'xai') {
+      return estimateXaiVideoCostUsd(durationSeconds, resolution, {
+        pricePerSecond480PUsd: Number.parseFloat(
+          this.config.get<string>('integrations.xaiVideoPricePerSecond480PUsd', '0.02'),
+        ),
+        pricePerSecond720PUsd: Number.parseFloat(
+          this.config.get<string>('integrations.xaiVideoPricePerSecond720PUsd', '0.03'),
+        ),
+        pricePerSecond1080PUsd: Number.parseFloat(
+          this.config.get<string>('integrations.xaiVideoPricePerSecond1080PUsd', '0.14'),
+        ),
+        currency: this.config.get<string>('integrations.xaiVideoCurrency', 'USD'),
+      });
+    }
     return estimateKlingVideoCostUsd(durationSeconds, resolution, {
       pricePerSecondUsd: Number.parseFloat(
         this.config.get<string>('integrations.klingPricePerSecondUsd', '0.07'),
@@ -76,6 +101,11 @@ export class VideoProviderRegistry {
       const value = this.config.get<number>('integrations.hailuoDefaultDuration', 6);
       return value === 10 ? 10 : 6;
     }
+    if (provider === 'xai') {
+      const value = this.config.get<number>('integrations.xaiVideoDefaultDuration', 8);
+      if (Number.isFinite(value) && value >= 1 && value <= 15) return value;
+      return 8;
+    }
     const value = this.config.get<number>('integrations.klingDefaultDurationSeconds', 5);
     return value === 10 ? 10 : 5;
   }
@@ -86,6 +116,14 @@ export class VideoProviderRegistry {
         this.config.get<string>('integrations.hailuoDefaultResolution', '768P') || '768P'
       ).toUpperCase();
       return value === '512P' ? '512P' : '768P';
+    }
+    if (provider === 'xai') {
+      const value = (
+        this.config.get<string>('integrations.xaiVideoResolution', '720p') || '720p'
+      ).toLowerCase();
+      if (value === '480p') return '480p';
+      if (value === '1080p') return '1080p';
+      return '720p';
     }
     const value = this.config.get<string>('integrations.klingDefaultResolution', '720p');
     return value === '1080p' ? '1080p' : '720p';
@@ -116,6 +154,22 @@ export class VideoProviderRegistry {
       return;
     }
 
+    if (provider === 'xai') {
+      const caps = getXaiVideoModelCapabilities(this.getModel(provider), process.env);
+      if (!caps.supportedDurations.includes(durationSeconds)) {
+        throw new Error(
+          `xAI Lite does not support duration ${durationSeconds}s. Supported: 1–15 seconds`,
+        );
+      }
+      const normalized = String(resolution).toLowerCase();
+      if (!caps.supportedResolutions.includes(normalized as '480p' | '720p' | '1080p')) {
+        throw new Error(
+          `xAI Lite does not support resolution ${resolution}. Supported: ${caps.supportedResolutions.join(', ')}`,
+        );
+      }
+      return;
+    }
+
     const caps = getKlingModelCapabilities(this.getModel(provider), process.env);
     if (!caps.supportedDurations.includes(durationSeconds)) {
       throw new Error(
@@ -135,7 +189,11 @@ export class VideoProviderRegistry {
   ): VideoProviderAvailability {
     const provider = this.resolve(id);
     const enabled =
-      id === 'hailuo' ? isHailuoVideoProviderEnabled(process.env) : isKlingVideoProviderEnabled(process.env);
+      id === 'hailuo'
+        ? isHailuoVideoProviderEnabled(process.env)
+        : id === 'xai'
+          ? isXaiVideoProviderEnabled(process.env)
+          : isKlingVideoProviderEnabled(process.env);
     const configured = provider.isConfigured();
     const mockMode = provider.shouldUseMock();
     const duration = this.getDefaultDuration(id);
@@ -143,24 +201,35 @@ export class VideoProviderRegistry {
     const currency =
       id === 'hailuo'
         ? this.config.get<string>('integrations.hailuoCurrency', 'USD')
-        : this.config.get<string>('integrations.klingCurrency', 'USD');
+        : id === 'xai'
+          ? this.config.get<string>('integrations.xaiVideoCurrency', 'USD')
+          : this.config.get<string>('integrations.klingCurrency', 'USD');
 
     let unavailableReason: string | undefined;
     if (!enabled) {
       unavailableReason =
         id === 'kling'
           ? 'Kling is registered but disabled (set KLING_ENABLED=true to enable)'
-          : 'Hailuo is disabled (HAILUO_ENABLED=false)';
+          : id === 'xai'
+            ? 'xAI Grok Lite is registered but disabled (set XAI_VIDEO_ENABLED=true to enable)'
+            : 'Hailuo is disabled (HAILUO_ENABLED=false)';
     }
 
     const caps =
       id === 'hailuo'
         ? getHailuoModelCapabilities(provider.getModel(), process.env)
-        : getKlingModelCapabilities(provider.getModel(), process.env);
+        : id === 'xai'
+          ? getXaiVideoModelCapabilities(provider.getModel(), process.env)
+          : getKlingModelCapabilities(provider.getModel(), process.env);
 
     return {
       id,
-      displayName: id === 'hailuo' ? 'MiniMax Hailuo-02' : 'Kling',
+      displayName:
+        id === 'hailuo'
+          ? 'MiniMax Hailuo-02'
+          : id === 'xai'
+            ? 'xAI Grok Imagine Video 1.5 Lite'
+            : 'Kling',
       default: id === defaultId,
       enabled,
       available: enabled,

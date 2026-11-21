@@ -6,5 +6,6 @@ export * from './mocks';
 export * from './video-provider';
 export * from './video-provider-selection';
 export * from './hailuo-request';
+export * from './xai-video-request';
 export * from './normalize';
 export * from './json-schemas';

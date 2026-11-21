@@ -73,20 +73,31 @@ export class StoryQualityEvaluatorService {
   /** Deterministic gate used after model (or mock) scoring. */
   applyThreshold(score: StoryQualityScore, threshold: number): StoryQualityScore {
     const rejectionReasons = [...score.rejectionReasons];
-    if (score.overall < threshold) {
-      rejectionReasons.push(`overall ${score.overall} < threshold ${threshold}`);
-    }
-    if (score.completeStoryResolution < threshold) {
-      rejectionReasons.push('completeStoryResolution below threshold');
-    }
-    if (score.plotCoherence < threshold) {
-      rejectionReasons.push('plotCoherence below threshold');
+    const gates: Array<{ key: keyof StoryQualityScore; label: string; value: number }> = [
+      { key: 'overall', label: 'overall', value: score.overall },
+      { key: 'plotCoherence', label: 'plotCoherence', value: score.plotCoherence },
+      {
+        key: 'completeStoryResolution',
+        label: 'completeStoryResolution',
+        value: score.completeStoryResolution,
+      },
+      { key: 'characterDepth', label: 'characterDepth', value: score.characterDepth },
+      {
+        key: 'emotionalEngagement',
+        label: 'emotionalEngagement',
+        value: score.emotionalEngagement,
+      },
+    ];
+
+    for (const gate of gates) {
+      if (gate.value < threshold) {
+        rejectionReasons.push(
+          `${gate.label} ${gate.value} < threshold ${threshold} — revise before accepting`,
+        );
+      }
     }
 
-    const accepted =
-      score.overall >= threshold &&
-      score.completeStoryResolution >= threshold &&
-      score.plotCoherence >= threshold;
+    const accepted = gates.every((gate) => gate.value >= threshold);
 
     return {
       ...score,

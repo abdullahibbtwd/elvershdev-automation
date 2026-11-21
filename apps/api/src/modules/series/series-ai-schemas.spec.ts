@@ -23,13 +23,35 @@ describe('Series AI Zod schemas', () => {
     expect(() =>
       movieArchitectBriefSchema.parse({
         genre: 'Drama',
-        plannedEpisodeCount: 1,
+        plannedEpisodeCount: 0,
         targetEpisodeDurationSeconds: 60,
         language: 'en',
         tone: 'Tone',
         visualDirection: 'Look',
       }),
     ).toThrow();
+    expect(() =>
+      movieArchitectBriefSchema.parse({
+        genre: 'Drama',
+        plannedEpisodeCount: 121,
+        targetEpisodeDurationSeconds: 60,
+        language: 'en',
+        tone: 'Tone',
+        visualDirection: 'Look',
+      }),
+    ).toThrow();
+  });
+
+  it('allows a single-episode short movie', () => {
+    const parsed = movieArchitectBriefSchema.parse({
+      genre: 'Drama',
+      plannedEpisodeCount: 1,
+      targetEpisodeDurationSeconds: 60,
+      language: 'en',
+      tone: 'Tone',
+      visualDirection: 'Look',
+    });
+    expect(parsed.plannedEpisodeCount).toBe(1);
   });
 
   it('parses mock premise and episode script plans', () => {

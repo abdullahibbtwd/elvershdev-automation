@@ -4,6 +4,8 @@ import { SeriesExecutionStatus, Prisma } from '@prisma/client';
 import {
   QUEUE_NAMES,
   type SeriesCharacterGenerationPayload,
+  type SeriesClipAssemblyPayload,
+  type SeriesClipGenerationPayload,
   type SeriesContinuityValidationPayload,
   type SeriesDialogueAudioPayload,
   type SeriesEpisodePlanningPayload,
@@ -19,6 +21,8 @@ import IORedis from 'ioredis';
 import { shouldRunQueueHosts } from '../../common/process-role';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CharacterDirectorService } from './character-director.service';
+import { ClipAssemblyService } from './clip-assembly.service';
+import { ClipGenerationService } from './clip-generation.service';
 import { ContinuityEngineService } from './continuity-engine.service';
 import { DialogueProductionService } from './dialogue-production.service';
 import { EpisodeDirectorService } from './episode-director.service';
@@ -51,6 +55,8 @@ export class SeriesQueueHost implements OnModuleInit, OnModuleDestroy {
     private readonly orchestrator: SeriesOrchestratorService,
     private readonly maintenance: SeriesMaintenanceService,
     private readonly dialogueProduction: DialogueProductionService,
+    private readonly clipGeneration: ClipGenerationService,
+    private readonly clipAssembly: ClipAssemblyService,
   ) {}
 
   private async settleStoryPlanningExecution(
@@ -304,6 +310,23 @@ export class SeriesQueueHost implements OnModuleInit, OnModuleDestroy {
             job.data.episodeId,
             { forceMock: forceMock ? true : undefined },
           );
+        },
+        { connection: this.connection, concurrency: 1 },
+      ),
+      new Worker(
+        QUEUE_NAMES.SERIES_CLIP_GENERATION,
+        async (job: Job<SeriesClipGenerationPayload>) => {
+          return this.clipGeneration.handleQueueJob(job.data);
+        },
+        {
+          connection: this.connection,
+          concurrency: Number.parseInt(process.env.SERIES_CLIP_MAX_CONCURRENCY ?? '1', 10) || 1,
+        },
+      ),
+      new Worker(
+        QUEUE_NAMES.SERIES_CLIP_ASSEMBLY,
+        async (job: Job<SeriesClipAssemblyPayload>) => {
+          return this.clipAssembly.handleQueueJob(job.data);
         },
         { connection: this.connection, concurrency: 1 },
       ),

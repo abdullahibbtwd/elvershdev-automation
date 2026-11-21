@@ -3,12 +3,12 @@ import {
   Clapperboard,
   Copy,
   Library,
+  MoreHorizontal,
   Pause,
   Play,
   Plus,
   RefreshCw,
   Settings,
-  Sparkles,
   Trash2,
 } from 'lucide-react';
 import { useMemo, useState } from 'react';
@@ -20,14 +20,9 @@ import { LoadingState } from '@/components/LoadingState';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
-import {
-  SERIES_GENRE_OPTIONS,
-  SERIES_THEME_OPTIONS,
-  seriesApi,
-  type SeriesLane,
-} from '@/lib/series-api';
+import { seriesApi, type SeriesLane } from '@/lib/series-api';
 import { statusTone } from '@/lib/status';
 
 function Stat({ label, value }: { label: string; value: React.ReactNode }) {
@@ -39,6 +34,25 @@ function Stat({ label, value }: { label: string; value: React.ReactNode }) {
   );
 }
 
+function formatWhen(value?: string | Date | null) {
+  if (!value) return null;
+  return new Date(value).toLocaleString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+}
+
+function laneStatusLabel(lane: SeriesLane, displayState?: string) {
+  if (!lane.enabled || lane.status === 'DISABLED') return { label: 'Off', tone: 'default' as const };
+  if (lane.status === 'PAUSED') return { label: 'Paused', tone: 'warning' as const };
+  if (displayState && displayState !== 'Idle' && displayState !== '…') {
+    return { label: displayState, tone: statusTone(displayState) };
+  }
+  return { label: 'Ready', tone: 'success' as const };
+}
+
 function LaneCard({
   lane,
   onChanged,
@@ -47,6 +61,9 @@ function LaneCard({
   onChanged: () => void;
 }) {
   const [confirmRun, setConfirmRun] = useState(false);
+  const [confirmReset, setConfirmReset] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [showMore, setShowMore] = useState(false);
   const [useMockAi, setUseMockAi] = useState(false);
 
   const execView = useQuery({
@@ -82,6 +99,7 @@ function LaneCard({
   const remove = useMutation({
     mutationFn: () => seriesApi.deleteLane(lane.id),
     onSuccess: () => {
+      setConfirmDelete(false);
       toast.success('Lane deleted');
       onChanged();
     },
@@ -89,6 +107,23 @@ function LaneCard({
       const message =
         (err as { response?: { data?: { message?: string } } })?.response?.data?.message ||
         'Failed to delete lane';
+      toast.error(String(message));
+    },
+  });
+  const reset = useMutation({
+    mutationFn: () => seriesApi.resetLane(lane.id),
+    onSuccess: (data) => {
+      setConfirmReset(false);
+      toast.success(`${lane.name} reset`, {
+        description: `Deleted ${data.deleted.seriesCount} movie(s), ${data.deleted.scheduleCount} schedule(s). Lane is paused.`,
+      });
+      onChanged();
+      void execView.refetch();
+    },
+    onError: (err: unknown) => {
+      const message =
+        (err as { response?: { data?: { message?: string } } })?.response?.data?.message ||
+        'Failed to reset lane';
       toast.error(String(message));
     },
   });
@@ -149,203 +184,201 @@ function LaneCard({
     resume.isPending ||
     duplicate.isPending ||
     remove.isPending ||
+    reset.isPending ||
     runNow.isPending ||
     produceNext.isPending ||
     planMovie.isPending;
 
-  const displayState = execView.data?.displayState ?? '…';
   const view = execView.data;
-  const progressLabel = lane.activeSeries
-    ? `Ep ${lane.activeSeries.currentEpisodeNumber}/${lane.activeSeries.plannedEpisodeCount}`
-    : `Ep ${lane.lastPublishedEpisodeNumber}/${lane.plannedEpisodeCount}`;
-  const fmt = (value?: string | Date | null) =>
-    value ? new Date(value).toLocaleString() : '—';
+  const hasMovie = Boolean(lane.activeSeries);
+  const isPaused = lane.status === 'PAUSED' || lane.status === 'DISABLED' || !lane.enabled;
+  const status = laneStatusLabel(lane, view?.displayState);
+  const nextPublish = formatWhen(view?.nextPublishAt ?? lane.nextPublishAt);
+  const nextAction =
+    view?.nextActionReason ??
+    (hasMovie ? 'Working on the next step…' : 'No movie yet — plan one to get started');
+
+  const headline = useMemo(() => {
+    if (!hasMovie) return 'No movie yet';
+    const series = lane.activeSeries!;
+    return `${series.title} · Ep ${series.currentEpisodeNumber}/${series.plannedEpisodeCount}`;
+  }, [hasMovie, lane.activeSeries]);
 
   return (
-    <section className="space-y-3 rounded-xl border border-border bg-card p-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <h2 className="text-lg font-semibold">{lane.name}</h2>
-          <p className="text-sm text-muted-foreground">
-            {lane.laneType} · Publishes at {lane.publishTime} ({lane.timezone}) · Lead{' '}
-            {lane.productionLeadTimeMinutes ?? 240}m · Mode{' '}
-            {lane.productionStartMode ?? 'NEXT_WINDOW'}
+    <section className="flex flex-col gap-4 rounded-xl border border-border bg-card p-5">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h2 className="text-lg font-semibold tracking-tight">{lane.name}</h2>
+          <p className="mt-0.5 text-sm text-muted-foreground">
+            Publishes daily at {lane.publishTime} ({lane.timezone})
           </p>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <Badge tone={statusTone(displayState)}>{displayState}</Badge>
-          <Badge tone={statusTone(lane.status)}>{lane.status}</Badge>
-          <Badge tone={lane.enabled ? 'success' : 'default'}>
-            {lane.enabled ? 'Enabled' : 'Disabled'}
-          </Badge>
-        </div>
+        <Badge tone={status.tone}>{status.label}</Badge>
       </div>
 
-      <div className="grid gap-2 text-sm sm:grid-cols-2">
-        <div>
-          <span className="text-muted-foreground">Active movie: </span>
-          {lane.activeSeries ? (
-            <Link className="text-primary hover:underline" to={`/series/${lane.activeSeries.id}`}>
-              {lane.activeSeries.title}
-            </Link>
-          ) : (
-            <span>None</span>
-          )}
-        </div>
-        <div>
-          <span className="text-muted-foreground">Progress: </span>
-          {progressLabel}
-        </div>
-        <div>
-          <span className="text-muted-foreground">Current episode: </span>
-          {view?.currentEpisode
-            ? `#${view.currentEpisode.episodeNumber} (${view.currentEpisode.status})`
-            : '—'}
-        </div>
-        <div>
-          <span className="text-muted-foreground">Next episode: </span>
-          {view?.nextEpisode
-            ? `#${view.nextEpisode.episodeNumber} (${view.nextEpisode.status})`
-            : '—'}
-        </div>
-        <div>
-          <span className="text-muted-foreground">Production status: </span>
-          {view?.productionStage ?? displayState}
-        </div>
-        <div>
-          <span className="text-muted-foreground">Approval: </span>
-          {view?.approvalStatus ?? lane.activeSeries?.approvalStatus ?? '—'}
-        </div>
-        <div>
-          <span className="text-muted-foreground">Next production: </span>
-          {fmt(view?.nextProductionAt ?? lane.nextProductionAt)}
-        </div>
-        <div>
-          <span className="text-muted-foreground">Next publish: </span>
-          {fmt(view?.nextPublishAt ?? lane.nextPublishAt)}
-        </div>
-        <div>
-          <span className="text-muted-foreground">Last published: </span>
-          {view?.lastPublishedEpisode
-            ? `#${view.lastPublishedEpisode.episodeNumber}`
-            : lane.lastPublishedEpisodeNumber
-              ? `#${lane.lastPublishedEpisodeNumber}`
-              : '—'}
-        </div>
-        <div className="sm:col-span-2">
-          <span className="text-muted-foreground">Next action: </span>
-          {view?.nextActionReason ?? '…'}
-        </div>
+      <div className="space-y-1">
+        {hasMovie ? (
+          <Link
+            to={`/series/${lane.activeSeries!.id}`}
+            className="block text-base font-medium text-foreground hover:text-primary"
+          >
+            {headline}
+          </Link>
+        ) : (
+          <p className="text-base font-medium text-foreground">{headline}</p>
+        )}
+        <p className="text-sm text-muted-foreground">{nextAction}</p>
+        {nextPublish ? (
+          <p className="text-sm text-muted-foreground">Next publish · {nextPublish}</p>
+        ) : null}
         {view?.blocker ? (
-          <div className="sm:col-span-2 text-amber-600 dark:text-amber-400">
-            Blocker: {view.blocker}
-          </div>
+          <p className="text-sm text-amber-600 dark:text-amber-400">{view.blocker}</p>
         ) : null}
         {view?.lastExecution?.errorMessage ? (
-          <div className="sm:col-span-2 text-destructive">
-            Last error: {view.lastExecution.errorMessage}
-          </div>
+          <p className="text-sm text-destructive">{view.lastExecution.errorMessage}</p>
         ) : null}
       </div>
 
-      {confirmRun ? (
-        <div className="space-y-2 rounded-lg border border-border bg-muted/40 p-3 text-sm">
-          <p>
-            Run Now will enqueue the next eligible step for <strong>{lane.name}</strong>. Approvals
-            and emergency stop are never bypassed. Jobs may still be running after this returns.
-          </p>
-          <label className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              checked={useMockAi}
-              onChange={(e) => setUseMockAi(e.target.checked)}
-            />
-            Use mock AI
-          </label>
-          <div className="flex flex-wrap gap-2">
-            <Button size="sm" disabled={busy} onClick={() => runNow.mutate()}>
-              Confirm Run Now
+      <div className="mt-auto flex flex-wrap items-center gap-2">
+        {!hasMovie ? (
+          <Button disabled={busy} onClick={() => planMovie.mutate()}>
+            <Clapperboard className="mr-1.5 h-4 w-4" />
+            Plan Movie
+          </Button>
+        ) : (
+          <>
+            <Link
+              to={`/series/${lane.activeSeries!.id}`}
+              className="inline-flex h-10 items-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+            >
+              Open movie
+            </Link>
+            <Button variant="outline" disabled={busy} onClick={() => setConfirmRun(true)}>
+              <Play className="mr-1.5 h-4 w-4" />
+              Run next step
             </Button>
-            <Button size="sm" variant="outline" disabled={busy} onClick={() => setConfirmRun(false)}>
-              Cancel
-            </Button>
-          </div>
-        </div>
-      ) : null}
+          </>
+        )}
 
-      <div className="flex flex-wrap gap-2">
-        <Button size="sm" variant="outline" disabled={busy} onClick={() => planMovie.mutate()}>
-          <Clapperboard className="mr-1 h-3 w-3" />
-          Plan Movie
-        </Button>
-        <Button size="sm" disabled={busy} onClick={() => setConfirmRun(true)}>
-          <Play className="mr-1 h-3 w-3" />
-          Run Now
-        </Button>
-        <Button size="sm" variant="outline" disabled={busy} onClick={() => produceNext.mutate()}>
-          Produce Next Episode
-        </Button>
-        {lane.status === 'PAUSED' || lane.status === 'DISABLED' ? (
-          <Button size="sm" variant="outline" disabled={busy} onClick={() => resume.mutate()}>
-            <Play className="mr-1 h-3 w-3" />
+        {isPaused ? (
+          <Button variant="outline" disabled={busy} onClick={() => resume.mutate()}>
+            <Play className="mr-1.5 h-4 w-4" />
             Resume
           </Button>
         ) : (
-          <Button size="sm" variant="outline" disabled={busy} onClick={() => pause.mutate()}>
-            <Pause className="mr-1 h-3 w-3" />
+          <Button variant="outline" disabled={busy} onClick={() => pause.mutate()}>
+            <Pause className="mr-1.5 h-4 w-4" />
             Pause
           </Button>
         )}
-        <Button size="sm" variant="outline" disabled={busy} onClick={() => duplicate.mutate()}>
-          <Copy className="mr-1 h-3 w-3" />
-          Duplicate
-        </Button>
-        {lane.activeSeries ? (
-          <Link
-            to={`/series/${lane.activeSeries.id}`}
-            className="inline-flex h-8 items-center rounded-md border border-input px-3 text-sm"
-          >
-            View Movie / Episodes
-          </Link>
-        ) : null}
-        <Link
-          to="/series/settings"
-          className="inline-flex h-8 items-center rounded-md border border-input px-3 text-sm"
+
+        <Button
+          size="icon"
+          variant="ghost"
+          className="ml-auto"
+          aria-label={showMore ? 'Hide more actions' : 'More actions'}
+          onClick={() => setShowMore((v) => !v)}
         >
-          Edit Settings
-        </Link>
-        {lane.laneType === 'CUSTOM' ? (
+          <MoreHorizontal className="h-4 w-4" />
+        </Button>
+      </div>
+
+      {showMore ? (
+        <div className="flex flex-wrap gap-2 border-t border-border pt-3">
+          {hasMovie ? (
+            <Button size="sm" variant="outline" disabled={busy} onClick={() => planMovie.mutate()}>
+              <Clapperboard className="mr-1 h-3 w-3" />
+              Plan new movie
+            </Button>
+          ) : null}
+          {hasMovie ? (
+            <Button size="sm" variant="outline" disabled={busy} onClick={() => produceNext.mutate()}>
+              Produce next episode
+            </Button>
+          ) : null}
+          <Button size="sm" variant="outline" disabled={busy} onClick={() => duplicate.mutate()}>
+            <Copy className="mr-1 h-3 w-3" />
+            Duplicate
+          </Button>
+          <Link
+            to="/series/settings"
+            className="inline-flex h-9 items-center gap-1 rounded-md border border-input px-3 text-sm"
+          >
+            <Settings className="h-3 w-3" />
+            Settings
+          </Link>
           <Button
             size="sm"
             variant="destructive"
             disabled={busy}
-            onClick={() => {
-              if (
-                window.confirm(
-                  `Delete ${lane.name}? Story data is retained but the lane will be removed from the dashboard.`,
-                )
-              ) {
-                remove.mutate();
-              }
-            }}
+            onClick={() => setConfirmReset(true)}
           >
             <Trash2 className="mr-1 h-3 w-3" />
-            Delete
+            Reset
           </Button>
-        ) : null}
-      </div>
+          {lane.laneType === 'CUSTOM' ? (
+            <Button size="sm" variant="outline" disabled={busy} onClick={() => setConfirmDelete(true)}>
+              Delete lane
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
+
+      <ConfirmDialog
+        open={confirmRun}
+        onOpenChange={setConfirmRun}
+        title={`Run next step on ${lane.name}?`}
+        description={
+          <div className="space-y-3">
+            <p>
+              Queues the next eligible step for this lane. Approvals and emergency stop are never
+              bypassed.
+            </p>
+            <label className="flex items-center gap-2 text-foreground">
+              <input
+                type="checkbox"
+                checked={useMockAi}
+                onChange={(e) => setUseMockAi(e.target.checked)}
+              />
+              Use mock AI
+            </label>
+          </div>
+        }
+        confirmLabel="Run now"
+        pending={runNow.isPending}
+        onConfirm={() => runNow.mutate()}
+      />
+      <ConfirmDialog
+        open={confirmReset}
+        onOpenChange={setConfirmReset}
+        title={`Reset ${lane.name}?`}
+        description={`This permanently deletes all movies, episodes, characters, schedules, and execution history on this lane.
+
+The lane itself stays (Morning/Evening). It will be paused so you can Plan Movie fresh.
+
+This cannot be undone.`}
+        confirmPhrase="RESET"
+        confirmLabel="Reset lane"
+        variant="destructive"
+        pending={reset.isPending}
+        onConfirm={() => reset.mutate()}
+      />
+      <ConfirmDialog
+        open={confirmDelete}
+        onOpenChange={setConfirmDelete}
+        title={`Delete ${lane.name}?`}
+        description="Story data is retained but the lane will be removed from the dashboard."
+        confirmLabel="Delete lane"
+        variant="destructive"
+        pending={remove.isPending}
+        onConfirm={() => remove.mutate()}
+      />
     </section>
   );
 }
 
 export function SeriesOverviewPage() {
   const queryClient = useQueryClient();
-  const [laneId, setLaneId] = useState('');
-  const [ideaMode, setIdeaMode] = useState<'generate' | 'custom'>('generate');
-  const [customPremise, setCustomPremise] = useState('');
-  const [selectedGenres, setSelectedGenres] = useState<string[]>(['Cinematic drama']);
-  const [selectedThemes, setSelectedThemes] = useState<string[]>([]);
-  const [instructions, setInstructions] = useState('');
   const [useMockAi, setUseMockAi] = useState(false);
   const [newLaneName, setNewLaneName] = useState('');
 
@@ -356,16 +389,6 @@ export function SeriesOverviewPage() {
   const lanesQuery = useQuery({
     queryKey: ['series', 'lanes'],
     queryFn: () => seriesApi.listLanes(),
-  });
-  const statusQuery = useQuery({
-    queryKey: ['series', 'scheduler'],
-    queryFn: () => seriesApi.schedulerStatus(),
-    refetchInterval: 15000,
-  });
-  const executionsQuery = useQuery({
-    queryKey: ['series', 'executions'],
-    queryFn: () => seriesApi.listExecutions({ take: 10 }),
-    refetchInterval: 12000,
   });
 
   const invalidate = () => void queryClient.invalidateQueries({ queryKey: ['series'] });
@@ -456,46 +479,6 @@ export function SeriesOverviewPage() {
     },
   });
 
-  const generate = useMutation({
-    mutationFn: async () => {
-      const targetLaneId = laneId || lanesQuery.data?.[0]?.id;
-      if (!targetLaneId) throw new Error('No lane');
-      if (ideaMode === 'custom' && !customPremise.trim()) {
-        throw new Error('Enter your movie idea');
-      }
-      return seriesApi.generate({
-        laneId: targetLaneId,
-        genre: selectedGenres[0],
-        theme: selectedThemes.slice(0, 4).join('; ') || undefined,
-        additionalInstructions: [
-          selectedThemes.length > 4
-            ? `Themes (full): ${selectedThemes.join('; ')}`
-            : null,
-          instructions || null,
-        ]
-          .filter(Boolean)
-          .join('\n') || undefined,
-        customPremise: ideaMode === 'custom' ? customPremise : undefined,
-        ideaMode,
-        useMockAi,
-        async: true,
-      });
-    },
-    onSuccess: () => {
-      toast.success('Movie planning queued');
-      invalidate();
-    },
-    onError: (err: unknown) => {
-      const message =
-        (err as { response?: { data?: { message?: string } } })?.response?.data?.message ||
-        (err as Error)?.message ||
-        'Failed to generate series';
-      toast.error(String(message));
-    },
-  });
-
-  const genreToggles = useMemo(() => SERIES_GENRE_OPTIONS, []);
-
   if (configQuery.isLoading || lanesQuery.isLoading) return <LoadingState />;
   if (configQuery.error || !configQuery.data) {
     return <ErrorState message="Failed to load Series Studio" onRetry={() => void configQuery.refetch()} />;
@@ -503,17 +486,6 @@ export function SeriesOverviewPage() {
 
   const config = configQuery.data;
   const lanes = lanesQuery.data ?? [];
-
-  const toggleGenre = (genre: string) => {
-    setSelectedGenres((prev) =>
-      prev.includes(genre) ? prev.filter((g) => g !== genre) : [...prev, genre],
-    );
-  };
-  const toggleTheme = (theme: string) => {
-    setSelectedThemes((prev) =>
-      prev.includes(theme) ? prev.filter((t) => t !== theme) : [...prev, theme],
-    );
-  };
 
   return (
     <div className="space-y-6">
@@ -568,33 +540,7 @@ export function SeriesOverviewPage() {
           label="Publishing"
           value={config.automaticPublishing ? 'Automatic' : 'Manual / off'}
         />
-        <Stat
-          label="Scheduler"
-          value={
-            statusQuery.data?.phase != null
-              ? `Phase ${String(statusQuery.data.phase)}`
-              : statusQuery.isLoading
-                ? '…'
-                : 'Idle'
-          }
-        />
-        <Stat
-          label="API process role"
-          value={String(statusQuery.data?.processRole ?? '…')}
-        />
       </div>
-      <p className="text-sm text-muted-foreground">
-        Monitoring centre — configure creative direction and autonomy in Settings. Routine approvals
-        are not required in Fully Autonomous Mode. Exceptional controls: pause lane, retry, emergency
-        stop.
-      </p>
-      {statusQuery.data?.topologyHint ? (
-        <p className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-950 dark:text-amber-100">
-          {String(statusQuery.data.topologyHint)} Queued PLAN_MOVIE is not a finished plan — check{' '}
-          <strong>api-scheduler</strong> logs for <code>Series queue host listening</code>.
-        </p>
-      ) : null}
-
       <div className="flex flex-wrap gap-2">
         <Button disabled={control.isPending} onClick={() => control.mutate('enable')}>
           Enable
@@ -647,6 +593,14 @@ export function SeriesOverviewPage() {
         >
           Emergency stop
         </Button>
+        <label className="flex items-center gap-2 text-sm text-muted-foreground">
+          <input
+            type="checkbox"
+            checked={useMockAi}
+            onChange={(e) => setUseMockAi(e.target.checked)}
+          />
+          Use mock AI for studio actions
+        </label>
       </div>
 
       <div className="flex flex-wrap items-end gap-2 rounded-xl border border-border bg-card p-4">
@@ -673,153 +627,6 @@ export function SeriesOverviewPage() {
           ))
         )}
       </div>
-
-      <section className="space-y-3 rounded-xl border border-border bg-card p-4">
-        <h2 className="text-lg font-semibold">Execution history</h2>
-        <p className="text-sm text-muted-foreground">
-          Persists across refreshes. Distinguish MANUAL vs SCHEDULED triggers, approvals, queue
-          state, and failures.
-        </p>
-        {(executionsQuery.data?.items?.length ?? 0) === 0 ? (
-          <p className="text-sm text-muted-foreground">No executions yet. Use Run Now on a lane.</p>
-        ) : (
-          <ul className="space-y-2 text-sm">
-            {executionsQuery.data!.items.map((ex) => (
-              <li
-                key={ex.id}
-                className="grid gap-1 border-b border-border py-2 sm:grid-cols-[1fr_auto]"
-              >
-                <div>
-                  <div className="font-medium">
-                    {ex.lane?.name ?? ex.laneId} · {ex.resolvedAction ?? ex.requestedAction}
-                  </div>
-                  <div className="text-xs text-muted-foreground">
-                    Trigger {ex.triggerSource} · started{' '}
-                    {ex.startedAt ? new Date(ex.startedAt).toLocaleString() : '—'}
-                    {ex.completedAt
-                      ? ` · completed ${new Date(ex.completedAt).toLocaleString()}`
-                      : ''}
-                    {ex.seriesId ? ` · movie ${ex.seriesId.slice(0, 8)}` : ''}
-                    {ex.episodeId ? ` · ep ${ex.episodeId.slice(0, 8)}` : ''}
-                  </div>
-                  {ex.errorMessage ? (
-                    <div className="text-xs text-destructive">{ex.errorMessage}</div>
-                  ) : null}
-                </div>
-                <Badge tone={statusTone(ex.status)}>{ex.status}</Badge>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-
-      <section className="space-y-4 rounded-xl border border-border bg-card p-4">
-        <div className="flex items-center gap-2">
-          <Sparkles className="h-4 w-4 text-primary" />
-          <h2 className="text-lg font-semibold">Generate movie plan</h2>
-        </div>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div className="space-y-1">
-            <label className="text-sm font-medium">Lane</label>
-            <select
-              className="flex h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-              value={laneId || lanes[0]?.id || ''}
-              onChange={(e) => setLaneId(e.target.value)}
-            >
-              {lanes.map((lane) => (
-                <option key={lane.id} value={lane.id}>
-                  {lane.name}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="space-y-1">
-            <label className="text-sm font-medium">Idea mode</label>
-            <select
-              className="flex h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-              value={ideaMode}
-              onChange={(e) => setIdeaMode(e.target.value as 'generate' | 'custom')}
-            >
-              <option value="generate">Option A — Generate an original idea</option>
-              <option value="custom">Option B — Use my own idea</option>
-            </select>
-          </div>
-        </div>
-
-        {ideaMode === 'custom' ? (
-          <div className="space-y-1">
-            <label className="text-sm font-medium">Your movie idea / premise</label>
-            <Textarea
-              value={customPremise}
-              onChange={(e) => setCustomPremise(e.target.value)}
-              rows={4}
-              placeholder="Describe the premise, conflict, characters, and ending direction…"
-            />
-          </div>
-        ) : null}
-
-        <div className="space-y-2">
-          <label className="text-sm font-medium">Genres</label>
-          <div className="flex flex-wrap gap-2">
-            {genreToggles.map((genre) => (
-              <button
-                key={genre}
-                type="button"
-                className={`rounded-md border px-2 py-1 text-xs ${
-                  selectedGenres.includes(genre)
-                    ? 'border-primary bg-primary/10 text-primary'
-                    : 'border-input'
-                }`}
-                onClick={() => toggleGenre(genre)}
-              >
-                {genre}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="space-y-2">
-          <label className="text-sm font-medium">Themes</label>
-          <div className="flex flex-wrap gap-2">
-            {SERIES_THEME_OPTIONS.map((theme) => (
-              <button
-                key={theme}
-                type="button"
-                className={`rounded-md border px-2 py-1 text-xs ${
-                  selectedThemes.includes(theme)
-                    ? 'border-primary bg-primary/10 text-primary'
-                    : 'border-input'
-                }`}
-                onClick={() => toggleTheme(theme)}
-              >
-                {theme}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="space-y-1">
-          <label className="text-sm font-medium">Additional creative preferences</label>
-          <Textarea
-            value={instructions}
-            onChange={(e) => setInstructions(e.target.value)}
-            rows={3}
-            placeholder="Optional — cannot override safety or continuity rules"
-          />
-        </div>
-        <label className="flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            checked={useMockAi}
-            onChange={(e) => setUseMockAi(e.target.checked)}
-          />
-          Use mock AI (no Gemini spend)
-        </label>
-        <Button disabled={generate.isPending || lanes.length === 0} onClick={() => generate.mutate()}>
-          <Clapperboard className="mr-2 h-4 w-4" />
-          Plan series
-        </Button>
-      </section>
     </div>
   );
 }

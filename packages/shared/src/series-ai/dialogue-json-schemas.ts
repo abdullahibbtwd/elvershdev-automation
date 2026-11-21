@@ -76,6 +76,7 @@ export const dialogueEpisodeScriptPlanJsonSchema = {
                 'charactersVisible',
                 'environment',
                 'durationSeconds',
+                'keyProps',
               ],
               properties: {
                 shotOrder: { type: 'integer' },
@@ -107,6 +108,12 @@ export const dialogueEpisodeScriptPlanJsonSchema = {
                 requiresLipSync: { type: 'boolean' },
                 ambientSound: { type: 'string' },
                 musicDirection: { type: 'string' },
+                keyProps: {
+                  type: 'array',
+                  items: { type: 'string' },
+                  description:
+                    'Visible story objects in this shot (phone, ring, letter, keys, gift, photo, etc.)',
+                },
               },
             },
           },

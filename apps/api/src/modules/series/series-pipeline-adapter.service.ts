@@ -11,6 +11,10 @@ import {
   SeriesEpisodeStatus,
   StoryStatus,
 } from '@prisma/client';
+import {
+  formatCharacterIdentityForClipPrompt,
+  seriesCharacterToIdentityProfile,
+} from '@ai-video/shared';
 import { PrismaService } from '../../prisma/prisma.service';
 
 function asStringArray(value: unknown): string[] {
@@ -131,12 +135,11 @@ export class SeriesPipelineAdapterService {
     }> = [];
 
     const characterNotesByName = new Map(
-      series.characters.map((character) => [
-        character.name.toLowerCase(),
-        character.visualConsistencyNotes ??
-          character.canonicalVisualDescription ??
-          character.physicalDescription,
-      ]),
+      series.characters.map((character) => {
+        const profile = seriesCharacterToIdentityProfile(character);
+        const block = formatCharacterIdentityForClipPrompt(profile);
+        return [character.name.toLowerCase(), block];
+      }),
     );
 
     if (dialogueDriven && dialoguePlan?.scenes?.length) {
@@ -259,6 +262,7 @@ export class SeriesPipelineAdapterService {
       await tx.characterProfile.deleteMany({ where: { storyId: story.id } });
       const createdProfiles = [];
       for (const character of series.characters) {
+        const identity = seriesCharacterToIdentityProfile(character);
         const profile = await tx.characterProfile.create({
           data: {
             storyId: story.id,
@@ -270,18 +274,28 @@ export class SeriesPipelineAdapterService {
             ageRange: character.ageRange?.trim() || 'adult',
             hair: character.hairFurColor?.trim() || 'as described',
             distinctiveFeatures:
-              [character.markings, character.facialStructure, character.eyeColor]
+              [
+                character.markings,
+                character.facialStructure,
+                character.eyeColor,
+                character.facialHair,
+              ]
                 .filter(Boolean)
                 .join('; ') || character.physicalDescription.slice(0, 200),
             consistencyNotes:
               character.visualConsistencyNotes?.trim() ||
               character.canonicalVisualDescription?.trim() ||
               `Preserve ${character.name} identity across episodes.`,
+            genderPresentation: character.genderPresentation ?? undefined,
+            skinTone: character.skinTone ?? undefined,
             facialFeatures: character.facialStructure ?? undefined,
+            hairstyle: character.hairstyle ?? undefined,
             hairColor: character.hairFurColor ?? undefined,
             bodyBuild: character.bodyProportions ?? undefined,
             accessories: character.accessories ?? undefined,
-            canonicalVisualDescription: character.canonicalVisualDescription ?? undefined,
+            canonicalVisualDescription:
+              character.canonicalVisualDescription ??
+              formatCharacterIdentityForClipPrompt(identity).slice(0, 4000),
             visualConsistencyInstructions: character.visualConsistencyNotes ?? undefined,
           },
         });

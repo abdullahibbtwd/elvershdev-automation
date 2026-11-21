@@ -73,7 +73,7 @@ async function resolveImageInput(storageKey: string, providerId: string): Promis
     };
   }
 
-  // Kling can accept base64 first-frame payloads when MinIO is not publicly reachable.
+  // Kling / xAI accept base64 (data URL) first-frame payloads when MinIO is not publicly reachable.
   return {
     imageUrl: `data:image/png;base64,${buffer.toString('base64')}`,
     imageBase64: buffer.toString('base64'),
@@ -222,35 +222,83 @@ export function createVideoGenerationProcessor(logger: Logger): Processor {
         return { status: 'cancelled' };
       }
 
-      const imageInput = await resolveImageInput(motion.sourceMediaAsset.storageKey, providerId);
       const model = motion.providerModel || provider.getModel();
       const forceMock = data.useMockAi === true || shouldUseVideoProviderMock(providerId);
+      const requestMode =
+        typeof payload.requestMode === 'string' ? payload.requestMode : undefined;
+      const preferTextToVideo =
+        providerId === 'xai' &&
+        (requestMode === 'text_to_video' ||
+          payload.textToVideo === true ||
+          !motion.sourceMediaAssetId);
+      const audioMode = providerId === 'xai' ? ('native' as const) : ('off' as const);
 
-      const submitInput = {
-        imageUrl: imageInput.imageUrl,
-        imageBase64: imageInput.imageBase64,
-        imageBytes: imageInput.imageBytes,
-        imageMimeType: imageInput.imageMimeType,
-        motionPrompt: motion.motionPrompt,
-        negativePrompt: motion.negativePrompt ?? undefined,
-        durationSeconds: motion.durationSeconds,
-        resolution: motion.resolution,
-        model,
-        externalTaskId: motion.id,
-        audio: 'off' as const,
-      };
+      let finalSubmit;
+      if (
+        preferTextToVideo &&
+        typeof provider.submitTextToVideo === 'function' &&
+        provider.supportsTextToVideo?.()
+      ) {
+        const t2vInput = {
+          prompt: motion.motionPrompt,
+          durationSeconds: motion.durationSeconds,
+          resolution: motion.resolution,
+          model,
+          externalTaskId: motion.id,
+          audio: audioMode,
+          aspectRatio:
+            typeof payload.aspectRatio === 'string' ? payload.aspectRatio : undefined,
+        };
+        finalSubmit = await provider.submitTextToVideo(t2vInput);
+        if (forceMock && !finalSubmit.mock) {
+          const previous = process.env.XAI_VIDEO_USE_MOCK;
+          process.env.XAI_VIDEO_USE_MOCK = 'true';
+          try {
+            finalSubmit = await provider.submitTextToVideo(t2vInput);
+          } finally {
+            if (previous === undefined) delete process.env.XAI_VIDEO_USE_MOCK;
+            else process.env.XAI_VIDEO_USE_MOCK = previous;
+          }
+        }
+      } else {
+        if (!motion.sourceMediaAsset) {
+          throw new Error('sourceMediaAsset is required for image-to-video generation');
+        }
+        const imageInput = await resolveImageInput(
+          motion.sourceMediaAsset.storageKey,
+          providerId,
+        );
+        const submitInput = {
+          imageUrl: imageInput.imageUrl,
+          imageBase64: imageInput.imageBase64,
+          imageBytes: imageInput.imageBytes,
+          imageMimeType: imageInput.imageMimeType,
+          motionPrompt: motion.motionPrompt,
+          negativePrompt: motion.negativePrompt ?? undefined,
+          durationSeconds: motion.durationSeconds,
+          resolution: motion.resolution,
+          model,
+          externalTaskId: motion.id,
+          audio: audioMode,
+        };
 
-      let finalSubmit = await provider.submitImageToVideo(submitInput);
+        finalSubmit = await provider.submitImageToVideo(submitInput);
 
-      if (forceMock && !finalSubmit.mock) {
-        const mockEnvKey = providerId === 'kling' ? 'KLING_USE_MOCK' : 'HAILUO_USE_MOCK';
-        const previous = process.env[mockEnvKey];
-        process.env[mockEnvKey] = 'true';
-        try {
-          finalSubmit = await provider.submitImageToVideo(submitInput);
-        } finally {
-          if (previous === undefined) delete process.env[mockEnvKey];
-          else process.env[mockEnvKey] = previous;
+        if (forceMock && !finalSubmit.mock) {
+          const mockEnvKey =
+            providerId === 'kling'
+              ? 'KLING_USE_MOCK'
+              : providerId === 'xai'
+                ? 'XAI_VIDEO_USE_MOCK'
+                : 'HAILUO_USE_MOCK';
+          const previous = process.env[mockEnvKey];
+          process.env[mockEnvKey] = 'true';
+          try {
+            finalSubmit = await provider.submitImageToVideo(submitInput);
+          } finally {
+            if (previous === undefined) delete process.env[mockEnvKey];
+            else process.env[mockEnvKey] = previous;
+          }
         }
       }
 
@@ -280,7 +328,8 @@ export function createVideoGenerationProcessor(logger: Logger): Processor {
           generationParameters: {
             durationSeconds: motion.durationSeconds,
             resolution: motion.resolution,
-            audio: 'off',
+            audio: audioMode,
+            mode: preferTextToVideo ? 'text_to_video' : 'image_to_video',
             mock: Boolean(finalSubmit.mock),
             externalTaskId: motion.id,
             provider: providerId,
@@ -299,7 +348,7 @@ export function createVideoGenerationProcessor(logger: Logger): Processor {
           generationJobId,
           provider: providerId,
           model: finalSubmit.model,
-          requestType: 'image_to_video_submit',
+          requestType: preferTextToVideo ? 'text_to_video_submit' : 'image_to_video_submit',
           estimatedCost: new Prisma.Decimal(estimatedCost),
           metadata: {
             motionGenerationId: motion.id,
@@ -307,6 +356,7 @@ export function createVideoGenerationProcessor(logger: Logger): Processor {
             providerTaskId: finalSubmit.providerTaskId,
             durationSeconds: motion.durationSeconds,
             resolution: motion.resolution,
+            mode: preferTextToVideo ? 'text_to_video' : 'image_to_video',
             estimated: true,
             costKind: 'estimated',
           },

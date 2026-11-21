@@ -14,6 +14,7 @@ import {
 import {
   QUEUE_NAMES,
   SERIES_DEFAULTS,
+  SERIES_DIALOGUE_CREATIVE_DEFAULTS,
   SERIES_NOTIFICATION_TYPES,
   buildEpisodeOutlinesPrompt,
   buildMovieArcPrompt,
@@ -42,6 +43,8 @@ import {
   normalizeMovieCharactersPlanInput,
   normalizeMoviePremiseInput,
   parseSeriesCreativeSettings,
+  planClipDurationsForEpisode,
+  resolveSeriesDurationPlan,
   type CompleteMoviePlan,
   type EpisodeOutline,
   type MovieArchitectBrief,
@@ -119,14 +122,19 @@ export class MovieArchitectService {
     const lane = await this.lanes.getOwned(userId, dto.laneId);
     const config = await this.configService.getOrCreate(userId);
 
-    // Precedence: system defaults < global creative < lane creative < request overrides
+    // Precedence: dialogue product defaults < system duration defaults < global < lane < request
     const mergedCreative = mergeSeriesCreativeSettings(
+      SERIES_DIALOGUE_CREATIVE_DEFAULTS,
       {
         language: config.language,
         tone: config.tone ?? undefined,
         visualStyle: config.visualDirection ?? undefined,
         episodesPerMovie: config.defaultPlannedEpisodeCount,
         episodeDurationSeconds: config.defaultEpisodeDurationSeconds,
+        storyDurationSeconds: config.defaultStoryDurationSeconds ?? undefined,
+        maxClipDurationSeconds: config.defaultMaxClipDurationSeconds,
+        productionFormat:
+          config.defaultProductionFormat === 'standalone' ? 'standalone' : 'episodic',
       },
       parseSeriesCreativeSettings(config.creativeSettings),
       parseSeriesCreativeSettings(lane.creativeSettings),
@@ -136,11 +144,41 @@ export class MovieArchitectService {
         targetAudience: dto.targetAudience,
         episodesPerMovie: dto.plannedEpisodeCount,
         episodeDurationSeconds: dto.targetEpisodeDurationSeconds,
+        storyDurationSeconds: dto.targetStoryDurationSeconds,
+        maxClipDurationSeconds: dto.maxClipDurationSeconds,
+        productionFormat: dto.productionFormat,
         customCreativeInstructions: dto.additionalInstructions,
         storyConcept: dto.customPremise,
       },
     );
     const fromCreative = creativeSettingsToBriefFields(mergedCreative);
+    const durationPlan = resolveSeriesDurationPlan({
+      productionFormat:
+        dto.productionFormat ??
+        fromCreative.productionFormat ??
+        (lane.productionFormat === 'standalone' ? 'standalone' : 'episodic'),
+      // Prefer saved Series Settings (config) over stale lane column defaults (often 60s / 10 eps).
+      storyDurationSeconds:
+        dto.targetStoryDurationSeconds ??
+        config.defaultStoryDurationSeconds ??
+        fromCreative.targetStoryDurationSeconds ??
+        lane.targetStoryDurationSeconds,
+      episodeDurationSeconds:
+        dto.targetEpisodeDurationSeconds ??
+        config.defaultEpisodeDurationSeconds ??
+        fromCreative.targetEpisodeDurationSeconds ??
+        lane.targetEpisodeDurationSeconds,
+      plannedEpisodeCount:
+        dto.plannedEpisodeCount ??
+        config.defaultPlannedEpisodeCount ??
+        fromCreative.plannedEpisodeCount ??
+        lane.plannedEpisodeCount,
+      maxClipDurationSeconds:
+        dto.maxClipDurationSeconds ??
+        fromCreative.maxClipDurationSeconds ??
+        lane.maxClipDurationSeconds ??
+        config.defaultMaxClipDurationSeconds,
+    });
     const ideaMode =
       dto.ideaMode === 'custom' || Boolean(dto.customPremise?.trim())
         ? 'custom'
@@ -182,18 +220,18 @@ export class MovieArchitectService {
           SERIES_DEFAULTS.visualDirection,
         500,
       ),
-      plannedEpisodeCount:
-        dto.plannedEpisodeCount ??
-        fromCreative.plannedEpisodeCount ??
-        lane.plannedEpisodeCount ??
-        config.defaultPlannedEpisodeCount,
-      targetEpisodeDurationSeconds:
-        dto.targetEpisodeDurationSeconds ??
-        fromCreative.targetEpisodeDurationSeconds ??
-        lane.targetEpisodeDurationSeconds ??
-        config.defaultEpisodeDurationSeconds,
+      plannedEpisodeCount: durationPlan.plannedEpisodeCount,
+      targetEpisodeDurationSeconds: durationPlan.episodeDurationSeconds,
+      targetStoryDurationSeconds: durationPlan.storyDurationSeconds,
+      maxClipDurationSeconds: durationPlan.maxClipDurationSeconds,
+      productionFormat: durationPlan.productionFormat,
       additionalInstructions: clip(
-        [themeOverflow, fromCreative.additionalInstructions, dto.additionalInstructions]
+        [
+          themeOverflow,
+          fromCreative.additionalInstructions,
+          dto.additionalInstructions,
+          ...durationPlan.notes,
+        ]
           .filter(Boolean)
           .join('\n') || undefined,
         8000,
@@ -210,8 +248,11 @@ export class MovieArchitectService {
         slug: await this.uniqueSlug(userId, `planning-${Date.now()}`),
         status: StorySeriesStatus.PLANNING,
         approvalStatus: SeriesApprovalStatus.PENDING,
-        plannedEpisodeCount: brief.plannedEpisodeCount,
-        targetEpisodeDurationSeconds: brief.targetEpisodeDurationSeconds,
+        plannedEpisodeCount: durationPlan.plannedEpisodeCount,
+        targetEpisodeDurationSeconds: durationPlan.episodeDurationSeconds,
+        targetStoryDurationSeconds: durationPlan.storyDurationSeconds,
+        maxClipDurationSeconds: durationPlan.maxClipDurationSeconds,
+        productionFormat: durationPlan.productionFormat,
         language: brief.language,
         tone: brief.tone,
         visualStyle: brief.visualDirection,
@@ -219,6 +260,7 @@ export class MovieArchitectService {
         metadata: {
           brief,
           creativeSettingsSnapshot: mergedCreative,
+          durationPlan,
           ideaMode,
         } as Prisma.InputJsonValue,
       },
@@ -267,14 +309,14 @@ export class MovieArchitectService {
         creativeSettingsSnapshot: mergedCreative,
       });
 
-      if (config.automaticCharacterGeneration) {
-        try {
-          await this.characters.generateReferencesForSeries(userId, persisted.id);
-        } catch (error) {
-          this.logger.warn(
-            `Character reference generation failed for ${persisted.id}: ${(error as Error).message}`,
-          );
-        }
+      // Always mint approved cartoon reference portraits after Plan Movie so every
+      // Grok clip can lock the same faces (TikTok/YouTube 9:16 continuity).
+      try {
+        await this.characters.generateReferencesForSeries(userId, persisted.id);
+      } catch (error) {
+        this.logger.warn(
+          `Character reference generation failed for ${persisted.id}: ${(error as Error).message}`,
+        );
       }
 
       // Mirror manual approveSeries: kick next lifecycle stage when movie is auto-approved.
@@ -523,6 +565,9 @@ export class MovieArchitectService {
           tone: brief.tone,
           plannedEpisodeCount: brief.plannedEpisodeCount,
           targetEpisodeDurationSeconds: brief.targetEpisodeDurationSeconds,
+          targetStoryDurationSeconds: brief.targetStoryDurationSeconds ?? null,
+          maxClipDurationSeconds: brief.maxClipDurationSeconds ?? 15,
+          productionFormat: brief.productionFormat ?? 'episodic',
           status: options.asReplacementCandidate
             ? StorySeriesStatus.REPLACEMENT_CANDIDATE
             : StorySeriesStatus.READY,
@@ -537,6 +582,13 @@ export class MovieArchitectService {
             creativeSettingsSnapshot: options.creativeSettingsSnapshot ?? brief,
             knowledgeMap: plan.arc.knowledgeMap,
             productionSeparatedFromPlanning: true,
+            durationPlan: resolveSeriesDurationPlan({
+              productionFormat: brief.productionFormat,
+              storyDurationSeconds: brief.targetStoryDurationSeconds,
+              episodeDurationSeconds: brief.targetEpisodeDurationSeconds,
+              plannedEpisodeCount: brief.plannedEpisodeCount,
+              maxClipDurationSeconds: brief.maxClipDurationSeconds,
+            }),
           } as Prisma.InputJsonValue,
         },
       });
@@ -595,8 +647,20 @@ export class MovieArchitectService {
 
       await this.characters.persistCharacters(seriesId, plan.characters, tx);
 
+      const durationPlan = resolveSeriesDurationPlan({
+        productionFormat: brief.productionFormat,
+        storyDurationSeconds: brief.targetStoryDurationSeconds,
+        episodeDurationSeconds: brief.targetEpisodeDurationSeconds,
+        plannedEpisodeCount: brief.plannedEpisodeCount,
+        maxClipDurationSeconds: brief.maxClipDurationSeconds,
+      });
+      const durationByEpisode = new Map(
+        durationPlan.episodes.map((slot) => [slot.episodeNumber, slot]),
+      );
+
       await tx.seriesEpisode.deleteMany({ where: { seriesId } });
       for (const outline of plan.episodeOutlines) {
+        const slot = durationByEpisode.get(outline.episodeNumber);
         await tx.seriesEpisode.create({
           data: {
             seriesId,
@@ -607,7 +671,8 @@ export class MovieArchitectService {
             ending: outline.cliffhangerOrEnding,
             cliffhanger: outline.cliffhangerOrEnding,
             nextEpisodeSetup: outline.nextEpisodeSetup,
-            targetDurationSeconds: brief.targetEpisodeDurationSeconds,
+            targetDurationSeconds:
+              slot?.targetDurationSeconds ?? brief.targetEpisodeDurationSeconds,
             status: SeriesEpisodeStatus.PLANNED,
             metadata: {
               keyPlotDevelopment: outline.keyPlotDevelopment,
@@ -615,6 +680,12 @@ export class MovieArchitectService {
               charactersFeatured: outline.charactersFeatured,
               reveals: outline.reveals,
               continuityNotes: outline.continuityNotes,
+              truncatedToFitStory: slot?.truncatedToFitStory === true,
+              maxClipDurationSeconds: durationPlan.maxClipDurationSeconds,
+              estimatedClipCount: planClipDurationsForEpisode(
+                slot?.targetDurationSeconds ?? brief.targetEpisodeDurationSeconds,
+                durationPlan.maxClipDurationSeconds,
+              ).length,
             },
           },
         });

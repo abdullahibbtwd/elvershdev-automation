@@ -140,13 +140,43 @@ export class UpdateSeriesConfigDto {
   @Max(120)
   defaultPlannedEpisodeCount?: number;
 
-  @ApiPropertyOptional({ default: 60 })
+  @ApiPropertyOptional({
+    default: 60,
+    description: 'Individual episode duration default (seconds). Not complete-story or clip duration.',
+  })
   @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(15)
-  @Max(600)
+  @Max(1800)
   defaultEpisodeDurationSeconds?: number;
+
+  @ApiPropertyOptional({
+    description:
+      'Complete story/movie duration default (seconds). Null keeps legacy count×episode derivation.',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(15)
+  @Max(3600)
+  defaultStoryDurationSeconds?: number | null;
+
+  @ApiPropertyOptional({
+    default: 15,
+    description: 'Max Grok Lite clip duration (≤15s). Independent from episode/story duration.',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(15)
+  defaultMaxClipDurationSeconds?: number;
+
+  @ApiPropertyOptional({ enum: ['episodic', 'standalone'] })
+  @IsOptional()
+  @IsIn(['episodic', 'standalone'])
+  defaultProductionFormat?: 'episodic' | 'standalone';
 
   @ApiPropertyOptional({ default: 8 })
   @IsOptional()

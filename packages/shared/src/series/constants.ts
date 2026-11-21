@@ -4,7 +4,13 @@ export const SERIES_DEFAULTS = {
   /** Product default for new lanes; existing rows are not rewritten by migration. */
   timezone: 'Africa/Lagos',
   autonomyMode: 'MANUAL' as const,
+  /** Individual episode default — not complete-story duration and not clip duration. */
   targetEpisodeDurationSeconds: 60,
+  /** Complete story/movie default when only count×episode is used (10×60s). */
+  targetStoryDurationSeconds: 600,
+  /** Grok Lite max per generation request. */
+  maxClipDurationSeconds: 15,
+  productionFormat: 'episodic' as const,
   plannedEpisodeCount: 10,
   replacementTriggerEpisode: 8,
   maxConcurrentEpisodeProduction: 1,
@@ -86,7 +92,10 @@ export const SERIES_FEATURE_SWITCHES = [
 
 export type SeriesFeatureSwitch = (typeof SERIES_FEATURE_SWITCHES)[number];
 
-/** Episode production stages through the existing media pipeline (Phase F). */
+/**
+ * @deprecated Legacy fal / Hailuo / narration episode path. Kept only for type compatibility
+ * with old run rows. Series Studio no longer starts or advances these stages.
+ */
 export const SERIES_PRODUCTION_STAGE_ORDER = [
   'MATERIALIZE',
   'VISUAL_INTELLIGENCE',
@@ -100,22 +109,29 @@ export const SERIES_PRODUCTION_STAGE_ORDER = [
 export type SeriesProductionStageName = (typeof SERIES_PRODUCTION_STAGE_ORDER)[number];
 
 /**
- * Dialogue-driven Series Studio production stages.
- * Replaces Hailuo-primary motion + narrator speech with per-line TTS + lip-sync shots.
+ * Series Studio production stages for every lane (morning / evening / custom).
+ * Script → materialize → Grok text-to-video clips → FFmpeg assemble.
+ * No fal stills, Hailuo motion, TTS narration, or lip-sync stages.
  */
 export const SERIES_DIALOGUE_PRODUCTION_STAGE_ORDER = [
   'MATERIALIZE',
+  'CLIP_GENERATION',
+  'ASSEMBLY',
+  'DONE',
+] as const;
+
+/** In-flight runs may still sit on these stages from the old fal/lip-sync path. */
+export const SERIES_DIALOGUE_LEGACY_STAGES = [
   'VOICE_ASSIGNMENT',
   'VISUAL_INTELLIGENCE',
   'DIALOGUE_AUDIO',
   'LIP_SYNC',
   'AUDIO_MIX',
-  'RENDER',
-  'DONE',
 ] as const;
 
 export type SeriesDialogueProductionStageName =
-  (typeof SERIES_DIALOGUE_PRODUCTION_STAGE_ORDER)[number];
+  | (typeof SERIES_DIALOGUE_PRODUCTION_STAGE_ORDER)[number]
+  | (typeof SERIES_DIALOGUE_LEGACY_STAGES)[number];
 
 export type SeriesAnyProductionStageName =
   | SeriesProductionStageName
@@ -134,9 +150,16 @@ export function nextSeriesProductionStage(
 export function nextSeriesDialogueProductionStage(
   stage: SeriesDialogueProductionStageName,
 ): SeriesDialogueProductionStageName | null {
-  const index = SERIES_DIALOGUE_PRODUCTION_STAGE_ORDER.indexOf(stage);
-  if (index < 0 || index >= SERIES_DIALOGUE_PRODUCTION_STAGE_ORDER.length - 1) {
-    return null;
+  const index = SERIES_DIALOGUE_PRODUCTION_STAGE_ORDER.indexOf(
+    stage as (typeof SERIES_DIALOGUE_PRODUCTION_STAGE_ORDER)[number],
+  );
+  if (index >= 0) {
+    if (index >= SERIES_DIALOGUE_PRODUCTION_STAGE_ORDER.length - 1) return null;
+    return SERIES_DIALOGUE_PRODUCTION_STAGE_ORDER[index + 1];
   }
-  return SERIES_DIALOGUE_PRODUCTION_STAGE_ORDER[index + 1];
+  // Skip abandoned fal / TTS / lip-sync stages → jump to Grok clips.
+  if ((SERIES_DIALOGUE_LEGACY_STAGES as readonly string[]).includes(stage)) {
+    return 'CLIP_GENERATION';
+  }
+  return null;
 }

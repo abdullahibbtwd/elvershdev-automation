@@ -23,4 +23,22 @@ describe('StoryQualityEvaluatorService.applyThreshold', () => {
       true,
     );
   });
+
+  it('rejects weak character depth or emotional engagement even if overall looks ok', () => {
+    const weakDepth = createMockStoryQualityScore(true);
+    weakDepth.characterDepth = 0.4;
+    weakDepth.overall = 0.92;
+    const depthResult = service.applyThreshold(weakDepth, 0.7);
+    expect(depthResult.accepted).toBe(false);
+    expect(depthResult.rejectionReasons.some((r) => r.includes('characterDepth'))).toBe(true);
+
+    const weakEmotion = createMockStoryQualityScore(true);
+    weakEmotion.emotionalEngagement = 0.3;
+    weakEmotion.overall = 0.91;
+    const emotionResult = service.applyThreshold(weakEmotion, 0.7);
+    expect(emotionResult.accepted).toBe(false);
+    expect(
+      emotionResult.rejectionReasons.some((r) => r.includes('emotionalEngagement')),
+    ).toBe(true);
+  });
 });

@@ -95,6 +95,54 @@ describe('SeriesEpisodeQualityService', () => {
     expect(result.score).toBe(1);
   });
 
+  it('passes dialogue-driven Grok path without lip-sync / TTS checks', async () => {
+    const dialogueProduction = {
+      evaluateDialogueQuality: jest.fn(async () => ({
+        passed: true,
+        checks: [
+          { id: 'pipeline', passed: true, detail: 'Grok text-to-video' },
+          { id: 'dialogue_lines_have_speakers', passed: true, hard: true, detail: '5 lines' },
+          { id: 'min_two_speakers', passed: true, hard: true, detail: '2 speakers' },
+          { id: 'grok_clips', passed: true, hard: true, detail: '6/6 Grok clips completed' },
+          { id: 'duration_range', passed: true, hard: false, detail: '31s (target 30s)' },
+        ],
+      })),
+    };
+    const prisma = {
+      seriesEpisode: {
+        findFirst: jest.fn(async () => ({
+          id: 'ep-1',
+          script: 'ELENA\nHello\nMAYA\nHi',
+          videoRenderId: 'render-1',
+          targetDurationSeconds: 30,
+          actualDurationSeconds: 31,
+          metadata: { dialogueDriven: true },
+          series: { targetEpisodeDurationSeconds: 30 },
+        })),
+        update: jest.fn(async () => ({})),
+      },
+      episodeScene: { count: jest.fn(async () => 2) },
+      videoRender: {
+        findFirst: jest.fn(async () => ({
+          id: 'render-1',
+          status: VideoRenderStatus.COMPLETED,
+          outputMediaAssetId: 'asset-1',
+          duration: 31,
+        })),
+      },
+    };
+
+    const service = new SeriesEpisodeQualityService(
+      prisma as never,
+      makeConfigService(0.7) as never,
+      dialogueProduction as never,
+    );
+    const result = await service.evaluateRenderedEpisode('user-1', 'ep-1');
+    expect(result.passed).toBe(true);
+    expect(result.checks.some((c) => c.id.startsWith('dialogue_lip_sync'))).toBe(false);
+    expect(dialogueProduction.evaluateDialogueQuality).toHaveBeenCalled();
+  });
+
   it('passes soft duration miss when score still meets saved threshold', async () => {
     const prisma = {
       seriesEpisode: {

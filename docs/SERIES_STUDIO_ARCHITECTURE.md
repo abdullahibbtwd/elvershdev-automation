@@ -14,7 +14,7 @@ The platform is a **pnpm + Turborepo monorepo** (`ai-video-platform`) with:
 | App / package | Role |
 | --- | --- |
 | `apps/api` | NestJS 10, Prisma 6, JWT auth, crons, BullMQ producers + API-hosted automation/analytics workers |
-| `apps/worker` | BullMQ media workers (Gemini, fal, Hailuo/Kling, TTS, FFmpeg → MinIO) |
+| `apps/worker` | BullMQ media workers (Gemini, fal, Hailuo/Kling/xAI Grok Lite, TTS, FFmpeg → MinIO) |
 | `apps/web` | React 18 + Vite SPA, TanStack Query, dark cyan dashboard |
 | `packages/shared` | Queues, Zod/JSON schemas, automation constants, pricing, prompts |
 | Postgres / Redis / MinIO | System of record, BullMQ + locks, media |
@@ -466,12 +466,15 @@ Follow-on docs:
 - `SERIES_STUDIO_SCHEDULER.md`
 - `SERIES_STUDIO_OPERATIONS.md`
 - `SERIES_STUDIO_COMPLETION_REPORT.md`
+- `SERIES_GROK_LITE_PHASE1.md`
+- `SERIES_CHARACTER_IDENTITY_PHASE2.md`
+- `SERIES_DURATION_LEVELS.md`
 
 ---
 
 ## 18. Explicit non-goals / do-not-touch list
 
-**Do not duplicate:** Gemini provider, fal/Hailuo/Kling, TTS, FFmpeg, MinIO, ProviderUsage ledger, social OAuth/publish processors, JWT auth.
+**Do not duplicate:** Gemini provider, fal/Hailuo/Kling/xAI video adapters, TTS, FFmpeg, MinIO, ProviderUsage ledger, social OAuth/publish processors, JWT auth.
 
 **Do not silently modify:** `AutomationConfig` defaults, automation cron behaviour, daily planner fingerprints, or standalone story UX as part of Series work.
 

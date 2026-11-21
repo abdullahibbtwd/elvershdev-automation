@@ -47,6 +47,10 @@ export const QUEUE_NAMES = {
   SERIES_LIP_SYNC: 'series-lip-sync',
   SERIES_SHOT_STILLS: 'series-shot-stills',
   SERIES_AUDIO_MIX: 'series-audio-mix',
+  /** Grok Imagine Video 1.5 Lite clip generation (Phase 4) */
+  SERIES_CLIP_GENERATION: 'series-clip-generation',
+  /** Concat COMPLETED clips + optional music bed (Phase 5) */
+  SERIES_CLIP_ASSEMBLY: 'series-clip-assembly',
 } as const;
 
 export type QueueName = (typeof QUEUE_NAMES)[keyof typeof QUEUE_NAMES];
@@ -92,6 +96,8 @@ export const ALL_QUEUE_NAMES = [
   QUEUE_NAMES.SERIES_LIP_SYNC,
   QUEUE_NAMES.SERIES_SHOT_STILLS,
   QUEUE_NAMES.SERIES_AUDIO_MIX,
+  QUEUE_NAMES.SERIES_CLIP_GENERATION,
+  QUEUE_NAMES.SERIES_CLIP_ASSEMBLY,
 ] as const;
 
 export const JOB_TYPE_TO_QUEUE = {
@@ -427,4 +433,36 @@ export interface SeriesAudioMixPayload {
   productionRunId?: string;
   useMockAi?: boolean;
   force?: boolean;
+}
+
+export type SeriesClipGenerationAction =
+  | 'generate_episode'
+  | 'generate_clip'
+  | 'process_clip'
+  | 'cancel_episode';
+
+export type SeriesClipGenerationMode = 'text_to_video' | 'image_to_video' | 'auto';
+
+export interface SeriesClipGenerationPayload {
+  userId: string;
+  seriesId: string;
+  episodeId: string;
+  clipId?: string;
+  action: SeriesClipGenerationAction;
+  /** auto = I2V when an approved character still exists, else T2V */
+  mode?: SeriesClipGenerationMode;
+  productionRunId?: string;
+  useMockAi?: boolean;
+  force?: boolean;
+}
+
+export interface SeriesClipAssemblyPayload {
+  userId: string;
+  seriesId: string;
+  episodeId: string;
+  productionRunId?: string;
+  backgroundMusicAssetId?: string;
+  musicGainDb?: number;
+  force?: boolean;
+  useMockAi?: boolean;
 }

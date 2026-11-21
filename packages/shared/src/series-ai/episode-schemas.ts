@@ -19,7 +19,11 @@ export const episodeScriptPlanSchema = z.object({
   title: z.string().min(1).max(200),
   synopsis: z.string().min(1),
   hook: z.string().min(1),
-  narrationText: z.string().min(1),
+  /**
+   * May be empty for dialogue-first scripts (spoken content lives in `script`).
+   * Legacy narration lanes should still populate this when a VO track is intended.
+   */
+  narrationText: z.string().default(''),
   script: z.string().min(1),
   ending: z.string().min(1),
   cliffhanger: z.string().optional().default(''),

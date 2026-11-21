@@ -11,6 +11,7 @@ import {
 } from '@prisma/client';
 import {
   applyContinuityChanges,
+  buildCharacterIdentityDigestLine,
   buildContinuityValidationPrompt,
   continuitySnapshotStateSchema,
   continuityValidationResultJsonSchema,
@@ -18,6 +19,7 @@ import {
   createEmptyContinuitySnapshot,
   createMockContinuityValidation,
   normalizeContinuityValidationInput,
+  seriesCharacterToIdentityProfile,
   type ContinuitySnapshotState,
   type ContinuityValidationResult,
   type EpisodeScriptPlan,
@@ -152,9 +154,14 @@ export class ContinuityEngineService {
       : 'No bible available';
 
     const characterDigest = series.characters
-      .map(
-        (c) =>
-          `- ${c.name} (${c.role}, ${c.species}): ${c.canonicalVisualDescription ?? c.physicalDescription}; knows secrets=${JSON.stringify(c.secrets)}; status=${c.lifecycleStatus}`,
+      .map((c) =>
+        buildCharacterIdentityDigestLine(
+          seriesCharacterToIdentityProfile({
+            ...c,
+            lifecycleStatus: c.lifecycleStatus,
+            secrets: c.secrets,
+          }),
+        ),
       )
       .join('\n');
 
@@ -571,7 +578,15 @@ export class ContinuityEngineService {
     // Appearance lock: narration/script should not invent a totally different species label for known cast.
     for (const character of context.series.characters) {
       const description = (character.canonicalVisualDescription ?? '').toLowerCase();
-      if (!description) continue;
+      if (!description.trim()) {
+        issues.push({
+          code: 'missing_canonical_identity',
+          severity: 'warning',
+          message: `${character.name} is missing a canonical visual description.`,
+          suggestedFix: 'Approve or rebuild the character identity profile before production.',
+        });
+        continue;
+      }
       if (
         description.includes('fox') &&
         plan.script.toLowerCase().includes(character.name.toLowerCase()) &&
@@ -583,6 +598,20 @@ export class ContinuityEngineService {
           message: `Script alters approved identity for ${character.name}.`,
           conflictingEvent: character.canonicalVisualDescription ?? undefined,
           suggestedFix: 'Keep approved species and visual identity unchanged.',
+        });
+      }
+      if (
+        /redesigns? (their|his|her) face|completely different face|new identity for/i.test(
+          plan.script,
+        ) &&
+        plan.script.toLowerCase().includes(character.name.toLowerCase())
+      ) {
+        issues.push({
+          code: 'identity_redesign',
+          severity: 'error',
+          message: `Script appears to redesign locked identity for ${character.name}.`,
+          conflictingEvent: character.canonicalVisualDescription ?? undefined,
+          suggestedFix: 'Preserve the approved canonical visual description across episodes.',
         });
       }
     }

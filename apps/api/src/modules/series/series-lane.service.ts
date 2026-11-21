@@ -10,6 +10,7 @@ import {
 } from '@prisma/client';
 import {
   SERIES_DEFAULTS,
+  SERIES_DIALOGUE_CREATIVE_DEFAULTS,
   SERIES_NOTIFICATION_TYPES,
   computeNextProductionAt,
   computeNextPublishAt,
@@ -21,6 +22,15 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { CreateSeriesLaneDto } from './dto/create-series-lane.dto';
 import { UpdateSeriesLaneDto } from './dto/update-series-lane.dto';
+
+function parseLaneCreativeSettings(raw: unknown) {
+  const parsed = seriesCreativeSettingsSchema.safeParse(raw);
+  if (parsed.success) return parsed.data;
+  const details = parsed.error.issues
+    .map((issue) => `${issue.path.join('.') || 'creativeSettings'}: ${issue.message}`)
+    .join('; ');
+  throw new BadRequestException(`Invalid lane creative settings — ${details}`);
+}
 
 const ACTIVE_SERIES_SELECT = {
   id: true,
@@ -62,7 +72,7 @@ export class SeriesLaneService {
           targetEpisodeDurationSeconds: SERIES_DEFAULTS.targetEpisodeDurationSeconds,
           replacementTriggerEpisode: SERIES_DEFAULTS.replacementTriggerEpisode,
           sortOrder: 0,
-          creativeSettings: {},
+          creativeSettings: SERIES_DIALOGUE_CREATIVE_DEFAULTS as Prisma.InputJsonValue,
         },
       });
     }
@@ -84,7 +94,7 @@ export class SeriesLaneService {
           targetEpisodeDurationSeconds: SERIES_DEFAULTS.targetEpisodeDurationSeconds,
           replacementTriggerEpisode: SERIES_DEFAULTS.replacementTriggerEpisode,
           sortOrder: 1,
-          creativeSettings: {},
+          creativeSettings: SERIES_DIALOGUE_CREATIVE_DEFAULTS as Prisma.InputJsonValue,
         },
       });
     }
@@ -114,12 +124,13 @@ export class SeriesLaneService {
     this.assertTimezone(dto.timezone);
 
     const planned = dto.plannedEpisodeCount ?? SERIES_DEFAULTS.plannedEpisodeCount;
-    const trigger = dto.replacementTriggerEpisode ?? SERIES_DEFAULTS.replacementTriggerEpisode;
-    if (trigger > planned) {
-      throw new BadRequestException(
-        'Replacement trigger episode cannot exceed planned episode count',
-      );
-    }
+    const trigger = Math.min(
+      Math.max(
+        1,
+        dto.replacementTriggerEpisode ?? SERIES_DEFAULTS.replacementTriggerEpisode,
+      ),
+      planned,
+    );
 
     const maxSort = await this.prisma.seriesLane.aggregate({
       where: { userId, deletedAt: null },
@@ -127,8 +138,8 @@ export class SeriesLaneService {
     });
 
     const creative = dto.creativeSettings
-      ? seriesCreativeSettingsSchema.parse(dto.creativeSettings)
-      : {};
+      ? parseLaneCreativeSettings(dto.creativeSettings)
+      : parseLaneCreativeSettings(SERIES_DIALOGUE_CREATIVE_DEFAULTS);
 
     const created = await this.prisma.seriesLane.create({
       data: {
@@ -195,12 +206,10 @@ export class SeriesLaneService {
     if (dto.timezone) this.assertTimezone(dto.timezone);
 
     const planned = dto.plannedEpisodeCount ?? before.plannedEpisodeCount;
-    const trigger = dto.replacementTriggerEpisode ?? before.replacementTriggerEpisode;
-    if (trigger > planned) {
-      throw new BadRequestException(
-        'Replacement trigger episode cannot exceed planned episode count',
-      );
-    }
+    const requestedTrigger =
+      dto.replacementTriggerEpisode ?? before.replacementTriggerEpisode;
+    // Keep lanes saveable after story-duration shrinks planned count; clamp trigger.
+    const trigger = Math.min(Math.max(1, requestedTrigger), planned);
 
     if (dto.activeSeriesId) {
       const series = await this.prisma.storySeries.findFirst({
@@ -215,9 +224,17 @@ export class SeriesLaneService {
 
     let creativeSettings: Prisma.InputJsonValue | undefined;
     if (dto.creativeSettings !== undefined) {
-      creativeSettings = seriesCreativeSettingsSchema.parse(
-        dto.creativeSettings,
-      ) as Prisma.InputJsonValue;
+      const parsed = parseLaneCreativeSettings(dto.creativeSettings);
+      creativeSettings = {
+        ...parsed,
+        // All lanes stay on Grok dialogue — never persist fal/narration mode.
+        dialogueDrivenStorytelling: true,
+        narrationPreference: parsed.narrationPreference ?? 'avoid',
+        aspectRatio: '9:16',
+        visualStyle:
+          parsed.visualStyle?.trim() ||
+          'Stylized cinematic 3D cartoon animation (Pixar/DreamWorks-like). Expressive cartoon faces, clean readable designs, consistent character model sheets. NOT photorealistic live-action humans.',
+      } as Prisma.InputJsonValue;
     }
 
     const updated = await this.prisma.seriesLane.update({
@@ -252,8 +269,16 @@ export class SeriesLaneService {
         ...(dto.targetEpisodeDurationSeconds !== undefined
           ? { targetEpisodeDurationSeconds: dto.targetEpisodeDurationSeconds }
           : {}),
-        ...(dto.replacementTriggerEpisode !== undefined
-          ? { replacementTriggerEpisode: dto.replacementTriggerEpisode }
+        ...(dto.targetStoryDurationSeconds !== undefined
+          ? { targetStoryDurationSeconds: dto.targetStoryDurationSeconds }
+          : {}),
+        ...(dto.maxClipDurationSeconds !== undefined
+          ? { maxClipDurationSeconds: dto.maxClipDurationSeconds }
+          : {}),
+        // Always persist a valid trigger when planned count changed or trigger was stale.
+        ...(trigger !== before.replacementTriggerEpisode ||
+        dto.replacementTriggerEpisode !== undefined
+          ? { replacementTriggerEpisode: trigger }
           : {}),
         ...(dto.activeSeriesId !== undefined
           ? { activeSeriesId: dto.activeSeriesId }
@@ -305,6 +330,123 @@ export class SeriesLaneService {
       data: { nextPublishAt, nextProductionAt },
       include: { activeSeries: { select: ACTIVE_SERIES_SELECT } },
     });
+  }
+
+  /**
+   * Wipe all story content for a lane and leave the lane shell ready for a fresh Plan Movie.
+   * Deletes series (cascades episodes/characters/bible/runs), schedules, replacements, executions.
+   * Does not delete the lane itself (Morning/Evening stay).
+   */
+  async resetLaneContent(userId: string, laneId: string) {
+    const before = await this.getOwned(userId, laneId);
+
+    const seriesRows = await this.prisma.storySeries.findMany({
+      where: { userId, laneId },
+      select: { id: true, title: true },
+    });
+    const seriesIds = seriesRows.map((row) => row.id);
+
+    const [scheduleCount, replacementCount, executionCount] = await this.prisma.$transaction(
+      async (tx) => {
+        // Clear active pointer first (unique FK to StorySeries).
+        await tx.seriesLane.update({
+          where: { id: laneId },
+          data: { activeSeriesId: null },
+        });
+
+        const schedules = await tx.seriesSchedule.deleteMany({
+          where: { userId, laneId },
+        });
+        const replacements = await tx.seriesReplacementPlan.deleteMany({
+          where: { userId, laneId },
+        });
+        const executions = await tx.seriesExecution.deleteMany({
+          where: { userId, laneId },
+        });
+
+        // StorySeries delete cascades: bible, characters, episodes (+ dialogue/shots/clips/schedules),
+        // continuity, memory, production runs, replacement source rows.
+        if (seriesIds.length > 0) {
+          await tx.storySeries.deleteMany({
+            where: { userId, laneId, id: { in: seriesIds } },
+          });
+        }
+
+        const now = new Date();
+        const nextPublishAt = computeNextPublishAt(now, before.timezone, before.publishTime);
+        const nextProductionAt = computeNextProductionAt(
+          now,
+          before.timezone,
+          before.publishTime,
+          before.productionLeadTimeMinutes,
+          before.preferredProductionTime,
+        );
+
+        await tx.seriesLane.update({
+          where: { id: laneId },
+          data: {
+            activeSeriesId: null,
+            currentEpisodeNumber: 0,
+            lastPublishedEpisodeNumber: 0,
+            lastPublishedAt: null,
+            nextPublishAt,
+            nextProductionAt,
+            status: SeriesLaneStatus.PAUSED,
+            pausedAt: new Date(),
+            metadata: {
+              ...((before.metadata as Record<string, unknown> | null) ?? {}),
+              lastResetAt: new Date().toISOString(),
+              lastResetSeriesCount: seriesIds.length,
+            } as Prisma.InputJsonValue,
+          },
+        });
+
+        return [schedules.count, replacements.count, executions.count] as const;
+      },
+    );
+
+    const updated = await this.prisma.seriesLane.findFirstOrThrow({
+      where: { id: laneId, userId },
+      include: { activeSeries: { select: ACTIVE_SERIES_SELECT } },
+    });
+
+    await this.audit(
+      userId,
+      'series.lane.reset',
+      {
+        activeSeriesId: before.activeSeriesId,
+        seriesIds,
+        seriesTitles: seriesRows.map((row) => row.title),
+      },
+      {
+        deletedSeriesCount: seriesIds.length,
+        deletedScheduleCount: scheduleCount,
+        deletedReplacementCount: replacementCount,
+        deletedExecutionCount: executionCount,
+        laneStatus: updated.status,
+      },
+      laneId,
+    );
+
+    await this.notifications.notify({
+      userId,
+      type: SERIES_NOTIFICATION_TYPES.LANE_PAUSED,
+      title: `${before.name} reset`,
+      body: `Cleared ${seriesIds.length} movie(s) and related schedules. Lane is paused — Plan Movie when ready.`,
+      dedupeKey: `series-lane-reset:${laneId}:${Date.now()}`,
+      metadata: { laneId, deletedSeriesCount: seriesIds.length },
+    }).catch(() => undefined);
+
+    return {
+      lane: this.serialize(updated),
+      deleted: {
+        seriesCount: seriesIds.length,
+        seriesIds,
+        scheduleCount,
+        replacementCount,
+        executionCount,
+      },
+    };
   }
 
   /**

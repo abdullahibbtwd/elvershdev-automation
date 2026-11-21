@@ -1,4 +1,4 @@
-export const VIDEO_PROVIDER_IDS = ['hailuo', 'kling'] as const;
+export const VIDEO_PROVIDER_IDS = ['hailuo', 'kling', 'xai'] as const;
 export type VideoProviderId = (typeof VIDEO_PROVIDER_IDS)[number];
 
 export interface VideoProviderAvailability {
@@ -34,6 +34,7 @@ export function normalizeVideoProviderId(
 ): VideoProviderId {
   const raw = (value || env.VIDEO_GENERATION_PROVIDER || 'hailuo').trim().toLowerCase();
   if (raw === 'kling') return 'kling';
+  if (raw === 'xai' || raw === 'grok') return 'xai';
   return 'hailuo';
 }
 
@@ -56,6 +57,13 @@ export function isHailuoVideoProviderEnabled(
   return env.HAILUO_ENABLED !== 'false';
 }
 
+/** xAI Grok Lite is opt-in; disabled unless explicitly enabled. */
+export function isXaiVideoProviderEnabled(
+  env: Record<string, string | undefined> = readProcessEnv(),
+): boolean {
+  return env.XAI_VIDEO_ENABLED === 'true';
+}
+
 export function assertVideoProviderSelectable(
   provider: VideoProviderId,
   env: Record<string, string | undefined> = readProcessEnv(),
@@ -67,5 +75,10 @@ export function assertVideoProviderSelectable(
   }
   if (provider === 'hailuo' && !isHailuoVideoProviderEnabled(env)) {
     throw new Error('Hailuo video generation is disabled (HAILUO_ENABLED=false).');
+  }
+  if (provider === 'xai' && !isXaiVideoProviderEnabled(env)) {
+    throw new Error(
+      'xAI Grok video generation is disabled (set XAI_VIDEO_ENABLED=true to use it).',
+    );
   }
 }

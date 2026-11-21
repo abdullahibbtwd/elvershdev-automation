@@ -32,21 +32,24 @@ export function buildDialogueEpisodeScriptPrompt(input: {
   );
   const allowNarration = input.creative?.narrationPreference === 'allowed';
   const density = input.creative?.dialogueDensity ?? 'high';
+  const isFinale = input.episodeNumber >= input.plannedEpisodeCount;
 
   return [
-    'You are the Episode Director for a dialogue-driven cinematic animated series.',
-    'Write ONE interconnected episode of a complete movie — not a standalone short story.',
-    'CRITICAL: Characters must speak directly to one another. This is an animated movie scene, not a narrated slideshow.',
+    'You are the Episode Director for a dialogue-driven cinematic short movie.',
+    'Write ONE connected PART of a complete movie — not a standalone short and not a confusing literary script.',
+    'QUALITY BAR: a stranger must understand this episode after one read. Clear conflict. Short spoken lines. Readable emotions.',
+    'CRITICAL: Characters speak directly to one another. This is a movie scene, not a narrated slideshow.',
     allowNarration
-      ? 'Narration is allowed only when explicitly needed for a creative purpose. Prefer character dialogue.'
-      : 'Do NOT use a narrator. Set narrationText to "" and scene narration to "". Story advances only through dialogue, action, and reaction.',
+      ? 'Narration is allowed only when explicitly needed. Prefer character dialogue.'
+      : 'Do NOT use a narrator. Set narrationText to "" and scene narration to "". Never invent a NARRATOR speaker. Story advances only through dialogue, action, and reaction.',
     'Respect canon: characters must not know secrets they have not discovered.',
     'Do not change approved character appearance or identity.',
-    'Visual direction: semi-realistic cinematic 3D animation with human proportions — not a childish cartoon.',
+    'Visual direction follows the series creative visual style (stylized cartoon by default unless settings say otherwise).',
     'Return ONE JSON object only. No markdown fences.',
     '',
     `Series: ${input.seriesTitle}`,
-    `Episode ${input.episodeNumber} of ${input.plannedEpisodeCount}`,
+    `Episode ${input.episodeNumber} of ${input.plannedEpisodeCount}` +
+      (isFinale ? ' (FINAL PART — land the reveal/resolution)' : ' (CONNECTED PART — end on tension that continues)'),
     `Target duration seconds: ${input.targetDurationSeconds}`,
     `Target spoken words roughly ${wordMin}-${wordMax}.`,
     `Dialogue density: ${density}.`,
@@ -83,11 +86,16 @@ export function buildDialogueEpisodeScriptPrompt(input: {
     'Current relationships:',
     input.relationshipsDigest || 'Use character relationship canon.',
     '',
-    'Language & dialogue:',
-    '- Use clear, natural spoken English that real people would say aloud.',
-    '- Prefer short sentences. Everyday life conversations.',
-    '- Show emotion through what characters say and how they say it.',
+    'Language & dialogue (mandatory):',
+    '- Clear everyday spoken English only. Write like real people arguing or whispering in a room.',
+    '- Good: “Who\'s Maya?” / “It\'s not what you think.” / “You told me there was nobody else!”',
+    '- Bad: long poetic speeches, legal essays, narrator summaries, or lines packed with exposition.',
+    '- Prefer short sentences. One idea per line. Emotion comes from wording + expression, not fancy vocabulary.',
+    '- The top-level script field MUST be CHARACTER: line format only (e.g. ELENA: Who is Claire?).',
+    '- Do NOT write literary screenplay cues (no “ELENA” alone on a line, no SCENE 1 - INT. blocks inside script).',
+    '- Put every spoken line into shots[].dialogue with requiresLipSync=true so Grok receives real speech, not buried stage directions.',
     input.languageStyleNotes ? `Creative language settings:\n${input.languageStyleNotes}` : '',
+    input.creative?.dialogueStyle ? `Dialogue style: ${input.creative.dialogueStyle}` : '',
     input.creative?.visualStyle ? `Visual style: ${input.creative.visualStyle}` : '',
     input.creative?.cinematicShotStyle
       ? `Cinematic shot style: ${input.creative.cinematicShotStyle}`
@@ -96,23 +104,36 @@ export function buildDialogueEpisodeScriptPrompt(input: {
       ? `Character animation style: ${input.creative.characterAnimationStyle}`
       : '',
     '',
-    'Shot craft (mandatory):',
+    'Shot craft (mandatory for Grok ≤15s packs):',
     '- Divide the episode into multiple short cinematic shots (not one continuous clip).',
-    '- Every dialogue line MUST name an exact character as speaker.',
+    '- Keep actions simple and filmable: sit, stand, open door, read phone, hand gift/ring, walk away, look shocked.',
+    '- Every dialogue line MUST name an exact character as speaker (never NARRATOR).',
     '- Alternate camera angles for conversations (shot / reverse shot).',
     '- Include reaction shots when useful (dialogue may be empty; requiresLipSync=false).',
-    '- Speaking shots: requiresLipSync=true and non-empty dialogue.',
-    '- Cost discipline: only speaking shots use expensive lip-sync video. Reaction / wide / insert shots are short and silent.',
-    '- Keep total speaking duration roughly 30–45% of the episode target (enough for story, not wall-to-wall talk).',
-    '- Do not make two characters speak in the same shot unless the script explicitly requires overlapping speech.',
-    '- Include facialExpression, bodyLanguage, cameraDirection, environment, lighting, durationSeconds.',
+    '- Reaction / silent shots: speaker = reacting character or empty; dialogue="".',
+    '- Speaking shots: requiresLipSync=true, non-empty dialogue, exact character name.',
+    '- continuityChanges arrays may be empty []; never include placeholder objects with missing fields.',
+    '- Cost discipline: only speaking shots need lip-sync; reactions/inserts stay short and silent.',
+    '- Keep total speaking duration roughly 30–45% of the episode target.',
+    '- Do not make two characters speak in the same shot unless overlapping speech is required.',
+    '- Include facialExpression, bodyLanguage, cameraDirection, environment, lighting, durationSeconds, keyProps.',
     '- Scene total durations should sum near the episode target.',
     '',
+    'Props / key objects (mandatory for EVERY story — not optional flavor):',
+    '- If the plot depends on a physical object (phone, ring, letter, keys, gift, photo, bag, laptop, flowers, etc.), that object MUST appear on camera.',
+    '- Put those objects in shot.keyProps as short concrete nouns (e.g. ["smartphone","engagement ring"]).',
+    '- bodyLanguage must say how the object is used: holding phone screen toward camera, sliding ring box open, handing letter, etc.',
+    '- When an object reveals the twist or carries emotion, add a short silent insert/close-up shot of that object (shotType=insert or close_up, dialogue="").',
+    '- Never rely on characters only talking about an object that never appears in frame.',
+    '- Scene.action and scene.visualDescription must name the same visible props.',
+    '',
     'Episode craft:',
-    '- Opening hook within the first shots',
-    '- One clear conflict developed through conversation',
-    '- Emotional peak',
-    '- Ending cliffhanger / development that pulls to the next episode',
+    '- Opening hook in the first shots',
+    '- One clear conflict through conversation',
+    '- Emotional peak (anger, fear, hope, shock)',
+    isFinale
+      ? '- FINAL episode: reveal the truth and land a satisfying ending (apology, proposal, reconciliation, consequence)'
+      : '- Non-final episode: end on tension/misunderstanding that pulls to the next part (not a fake open ending)',
     '',
     'Required top-level keys: episodeNumber, title, synopsis, hook, ending, cliffhanger,',
     'nextEpisodeSetup, keyPlotDevelopment, emotionalBeats, spokenWordCount, script, narrationText,',
@@ -120,7 +141,7 @@ export function buildDialogueEpisodeScriptPrompt(input: {
     'Each scene needs sceneNumber, durationSeconds, location, characters, backgroundEnvironment,',
     'emotionalDirection, action, visualDescription, shots[].',
     'Each shot needs shotOrder, shotType, speaker, dialogue, emotion, facialExpression, bodyLanguage,',
-    'cameraDirection, charactersVisible, environment, durationSeconds, requiresLipSync.',
+    'cameraDirection, charactersVisible, environment, durationSeconds, requiresLipSync, keyProps.',
   ]
     .filter(Boolean)
     .join('\n');

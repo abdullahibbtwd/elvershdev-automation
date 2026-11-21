@@ -3,6 +3,7 @@ import { GeminiProvider } from './providers/gemini.provider';
 import { FalProvider } from './providers/fal.provider';
 import { KlingProvider } from './providers/kling.provider';
 import { HailuoProvider } from './providers/hailuo.provider';
+import { XaiVideoProvider } from './providers/xai-video.provider';
 import { LipSyncProvider } from './providers/lip-sync.provider';
 import { GeminiTtsProvider } from './providers/gemini-tts.provider';
 import { FacebookProvider } from './providers/facebook.provider';
@@ -20,6 +21,7 @@ import { VideoProviderRegistry } from './video/video-provider.registry';
     FalProvider,
     KlingProvider,
     HailuoProvider,
+    XaiVideoProvider,
     LipSyncProvider,
     GeminiTtsProvider,
     VideoProviderRegistry,
@@ -35,6 +37,7 @@ import { VideoProviderRegistry } from './video/video-provider.registry';
     FalProvider,
     KlingProvider,
     HailuoProvider,
+    XaiVideoProvider,
     LipSyncProvider,
     GeminiTtsProvider,
     VideoProviderRegistry,

@@ -18,6 +18,9 @@ export type SeriesCreativeSettings = {
   characterConsistencyRequired?: boolean;
   narrationPreferences?: string;
   episodeDurationSeconds?: number;
+  storyDurationSeconds?: number;
+  maxClipDurationSeconds?: number;
+  productionFormat?: 'episodic' | 'standalone';
   episodesPerMovie?: number;
   aspectRatio?: string;
   storyConcept?: string;
@@ -72,6 +75,9 @@ export type SeriesConfig = {
   defaultProductionLeadTimeMinutes: number;
   defaultPlannedEpisodeCount: number;
   defaultEpisodeDurationSeconds: number;
+  defaultStoryDurationSeconds?: number | null;
+  defaultMaxClipDurationSeconds?: number;
+  defaultProductionFormat?: 'episodic' | 'standalone';
   defaultReplacementTriggerEpisode: number;
   maxConcurrentEpisodeProduction: number;
   maxRetries: number;
@@ -103,6 +109,8 @@ export type SeriesLane = {
   customProductionStartAt?: string | null;
   plannedEpisodeCount: number;
   targetEpisodeDurationSeconds: number;
+  targetStoryDurationSeconds?: number | null;
+  maxClipDurationSeconds?: number;
   replacementTriggerEpisode: number;
   currentEpisodeNumber: number;
   lastPublishedEpisodeNumber: number;
@@ -200,6 +208,73 @@ export type StorySeriesListItem = {
   createdAt: string;
 };
 
+export type SeriesEpisodeShot = {
+  id: string;
+  sceneOrder: number;
+  shotOrder: number;
+  shotType: string;
+  speakerName: string | null;
+  durationSeconds: number;
+  cameraDirection: string | null;
+  facialExpression: string | null;
+  bodyLanguage: string | null;
+  environment: string | null;
+  status: string;
+  dialogueLine?: {
+    id: string;
+    text: string;
+    speakerName: string | null;
+    emotion: string | null;
+    durationSeconds: number | null;
+  } | null;
+};
+
+export type SeriesEpisodeVideoClip = {
+  id: string;
+  clipIndex: number;
+  sceneOrder: number;
+  shotOrders: number[] | unknown;
+  durationSeconds: number;
+  startOffsetSeconds: number;
+  endOffsetSeconds: number;
+  characters: string[] | unknown;
+  speakerName: string | null;
+  dialogue: string | null;
+  location: string | null;
+  action: string | null;
+  camera: string | null;
+  prompt: string;
+  status: string;
+  providerRequestId?: string | null;
+  videoMediaAssetId?: string | null;
+  estimatedCostUsd?: string | number | null;
+  actualCostUsd?: string | number | null;
+  errorMessage?: string | null;
+};
+
+export type SeriesClipGenerationStatus = {
+  episodeId: string;
+  clipCount: number;
+  completedCount: number;
+  failedCount: number;
+  inFlightCount: number;
+  statusCounts: Record<string, number>;
+  estimatedCostUsd: number;
+  actualCostUsd: number;
+  clips: SeriesEpisodeVideoClip[];
+};
+
+export type SeriesEpisodeClipPlan = {
+  episodeId: string;
+  clipCount: number;
+  totalDurationSeconds: number;
+  estimatedCostUsd: number;
+  clips: SeriesEpisodeVideoClip[];
+  notes?: string[];
+  maxClipDurationSeconds?: number;
+  persisted?: boolean;
+};
+
 export type SeriesEpisode = {
   id: string;
   episodeNumber: number;
@@ -214,6 +289,7 @@ export type SeriesEpisode = {
   approvalStatus: string;
   productionState: string;
   targetDurationSeconds: number;
+  actualDurationSeconds?: number | null;
   spokenWordCount: number | null;
   storyId: string | null;
   videoRenderId: string | null;
@@ -229,6 +305,8 @@ export type SeriesEpisode = {
     narration: string | null;
     dialogue: string | null;
   }>;
+  shots?: SeriesEpisodeShot[];
+  videoClips?: SeriesEpisodeVideoClip[];
 };
 
 export type SeriesCharacter = {
@@ -236,17 +314,59 @@ export type SeriesCharacter = {
   name: string;
   role: string;
   species: string;
+  ageRange?: string | null;
+  genderPresentation?: string | null;
+  skinTone?: string | null;
   personality: string;
   physicalDescription: string;
+  facialStructure?: string | null;
+  eyeColor?: string | null;
+  eyeShape?: string | null;
+  hairstyle?: string | null;
+  hairFurColor?: string | null;
+  facialHair?: string | null;
+  bodyProportions?: string | null;
+  heightRelative?: string | null;
+  clothing?: string | null;
+  accessories?: string | null;
+  markings?: string | null;
+  voiceProfile?: string | null;
   canonicalVisualDescription: string | null;
+  visualConsistencyNotes?: string | null;
+  identityVersion?: number;
   lifecycleStatus: string;
   approvedAt: string | null;
+  clipPromptPreview?: string;
+  identityProfile?: Record<string, unknown>;
   referenceAssets?: Array<{
     id: string;
     isPrimary: boolean;
     isApproved: boolean;
     mediaAsset?: { id: string; publicUrl?: string | null; storageKey?: string } | null;
   }>;
+};
+
+export type SeriesCharacterIdentityUpdate = {
+  ageRange?: string;
+  genderPresentation?: string | null;
+  skinTone?: string | null;
+  facialStructure?: string | null;
+  eyeColor?: string | null;
+  eyeShape?: string | null;
+  hairstyle?: string | null;
+  hairFurColor?: string | null;
+  facialHair?: string | null;
+  bodyProportions?: string | null;
+  heightRelative?: string | null;
+  clothing?: string | null;
+  accessories?: string | null;
+  markings?: string | null;
+  voiceProfile?: string | null;
+  personality?: string;
+  physicalDescription?: string;
+  canonicalVisualDescription?: string | null;
+  visualConsistencyNotes?: string | null;
+  rebuildCanonicalDescription?: boolean;
 };
 
 export type SeriesDetail = {
@@ -328,6 +448,17 @@ export const seriesApi = {
     data<SeriesLane>(api.patch(`/series/lanes/${id}`, body)),
   duplicateLane: (id: string) => data<SeriesLane>(api.post(`/series/lanes/${id}/duplicate`)),
   deleteLane: (id: string) => data<SeriesLane>(api.delete(`/series/lanes/${id}`)),
+  resetLane: (id: string) =>
+    data<{
+      lane: SeriesLane;
+      deleted: {
+        seriesCount: number;
+        seriesIds: string[];
+        scheduleCount: number;
+        replacementCount: number;
+        executionCount: number;
+      };
+    }>(api.post(`/series/lanes/${id}/reset`)),
   pauseLane: (id: string) => data<SeriesLane>(api.post(`/series/lanes/${id}/pause`)),
   resumeLane: (id: string) => data<SeriesLane>(api.post(`/series/lanes/${id}/resume`)),
   ensureSchedule: (laneId: string) =>
@@ -397,10 +528,30 @@ export const seriesApi = {
 
   listCharacters: (seriesId: string) =>
     data<SeriesCharacter[]>(api.get(`/series/${seriesId}/characters`)),
+  getCharacter: (seriesId: string, characterId: string) =>
+    data<SeriesCharacter>(api.get(`/series/${seriesId}/characters/${characterId}`)),
+  updateCharacterIdentity: (
+    seriesId: string,
+    characterId: string,
+    body: SeriesCharacterIdentityUpdate,
+  ) =>
+    data<SeriesCharacter>(
+      api.patch(`/series/${seriesId}/characters/${characterId}/identity`, body),
+    ),
+  approveCharacterIdentity: (seriesId: string, characterId: string) =>
+    data<SeriesCharacter>(
+      api.post(`/series/${seriesId}/characters/${characterId}/approve-identity`),
+    ),
+  approveAllCharacterIdentities: (seriesId: string) =>
+    data<SeriesCharacter[]>(api.post(`/series/${seriesId}/characters/approve-identities`)),
   generateCharacterRefs: (seriesId: string) =>
     data<unknown>(api.post(`/series/${seriesId}/characters/references`)),
   generateOneCharacterRef: (seriesId: string, characterId: string) =>
     data<unknown>(api.post(`/series/${seriesId}/characters/${characterId}/references`)),
+  approveCharacterReference: (seriesId: string, assetId: string) =>
+    data<unknown>(api.post(`/series/${seriesId}/characters/references/${assetId}/approve`)),
+  setPrimaryCharacterReference: (seriesId: string, assetId: string) =>
+    data<unknown>(api.post(`/series/${seriesId}/characters/references/${assetId}/primary`)),
 
   getEpisode: (seriesId: string, episodeId: string) =>
     data<SeriesEpisode>(api.get(`/series/${seriesId}/episodes/${episodeId}`)),
@@ -416,7 +567,108 @@ export const seriesApi = {
   ) =>
     data<unknown>(api.post(`/series/${seriesId}/episodes/${episodeId}/regenerate`, body ?? {})),
   approveEpisode: (seriesId: string, episodeId: string) =>
-    data<unknown>(api.post(`/series/${seriesId}/episodes/${episodeId}/approve`)),
+    data<SeriesEpisode>(api.post(`/series/${seriesId}/episodes/${episodeId}/approve`)),
+  getClipPlan: (seriesId: string, episodeId: string) =>
+    data<SeriesEpisodeClipPlan>(api.get(`/series/${seriesId}/episodes/${episodeId}/clip-plan`)),
+  planClips: (
+    seriesId: string,
+    episodeId: string,
+    body?: { force?: boolean; persist?: boolean },
+  ) =>
+    data<SeriesEpisodeClipPlan>(
+      api.post(`/series/${seriesId}/episodes/${episodeId}/clip-plan`, body ?? {}),
+    ),
+  estimateClipPlan: (seriesId: string, episodeId: string) =>
+    data<SeriesEpisodeClipPlan>(
+      api.post(`/series/${seriesId}/episodes/${episodeId}/clip-plan/estimate`),
+    ),
+  getClips: (seriesId: string, episodeId: string) =>
+    data<SeriesClipGenerationStatus>(api.get(`/series/${seriesId}/episodes/${episodeId}/clips`)),
+  generateClips: (
+    seriesId: string,
+    episodeId: string,
+    body?: {
+      useMockAi?: boolean;
+      force?: boolean;
+      async?: boolean;
+      mode?: 'text_to_video' | 'image_to_video' | 'auto';
+    },
+  ) =>
+    data<{
+      queued?: boolean;
+      clipCount?: number;
+      queuedClipIds?: string[];
+      message?: string;
+    }>(api.post(`/series/${seriesId}/episodes/${episodeId}/clips/generate`, body ?? {})),
+  generateOneClip: (
+    seriesId: string,
+    episodeId: string,
+    clipId: string,
+    body?: {
+      useMockAi?: boolean;
+      force?: boolean;
+      async?: boolean;
+      mode?: 'text_to_video' | 'image_to_video' | 'auto';
+    },
+  ) =>
+    data<unknown>(
+      api.post(`/series/${seriesId}/episodes/${episodeId}/clips/${clipId}/generate`, body ?? {}),
+    ),
+  retryClip: (
+    seriesId: string,
+    episodeId: string,
+    clipId: string,
+    body?: { useMockAi?: boolean; mode?: 'text_to_video' | 'image_to_video' | 'auto' },
+  ) =>
+    data<unknown>(
+      api.post(`/series/${seriesId}/episodes/${episodeId}/clips/${clipId}/retry`, body ?? {}),
+    ),
+  cancelClips: (seriesId: string, episodeId: string) =>
+    data<{ cancelledCount: number }>(
+      api.post(`/series/${seriesId}/episodes/${episodeId}/clips/cancel`),
+    ),
+  getAssembly: (seriesId: string, episodeId: string) =>
+    data<{
+      episodeId: string;
+      clipCount: number;
+      completedClipCount: number;
+      readyToAssemble: boolean;
+      videoRenderId: string | null;
+      actualDurationSeconds: number | null;
+      render: {
+        id: string;
+        status: string;
+        duration: number | null;
+        outputMediaAssetId: string | null;
+        outputMediaAsset?: {
+          id: string;
+          storageKey: string;
+          mimeType: string | null;
+          fileSize: number | bigint | null;
+        } | null;
+      } | null;
+    }>(api.get(`/series/${seriesId}/episodes/${episodeId}/assembly`)),
+  getMediaDownloadUrl: (mediaAssetId: string) =>
+    data<{ url: string }>(api.get(`/media/${mediaAssetId}/download-url`)),
+  assembleEpisode: (
+    seriesId: string,
+    episodeId: string,
+    body?: {
+      force?: boolean;
+      async?: boolean;
+      backgroundMusicAssetId?: string;
+      musicGainDb?: number;
+    },
+  ) =>
+    data<{
+      queued?: boolean;
+      skipped?: boolean;
+      processed?: boolean;
+      jobId?: string;
+      videoRenderId?: string;
+      reason?: string;
+      result?: Record<string, unknown>;
+    }>(api.post(`/series/${seriesId}/episodes/${episodeId}/assemble`, body ?? {})),
   validateContinuity: (
     seriesId: string,
     episodeId: string,

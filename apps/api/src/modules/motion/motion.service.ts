@@ -845,6 +845,9 @@ export class MotionService {
     if (providerId === 'hailuo') {
       return this.config.get<string>('integrations.hailuoCurrency', 'USD');
     }
+    if (providerId === 'xai') {
+      return this.config.get<string>('integrations.xaiVideoCurrency', 'USD');
+    }
     return this.config.get<string>('integrations.klingCurrency', 'USD');
   }
 
@@ -858,7 +861,9 @@ export class MotionService {
     const maxMonthly =
       providerId === 'hailuo'
         ? this.config.get<string>('integrations.hailuoMaxMonthlySpendUsd')
-        : this.config.get<string>('integrations.klingMaxMonthlySpendUsd');
+        : providerId === 'xai'
+          ? this.config.get<string>('integrations.xaiVideoMaxMonthlySpendUsd')
+          : this.config.get<string>('integrations.klingMaxMonthlySpendUsd');
     if (!maxMonthly) return;
 
     const limit = Number.parseFloat(maxMonthly);

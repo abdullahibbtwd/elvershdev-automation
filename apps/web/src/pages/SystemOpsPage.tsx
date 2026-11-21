@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 import { ErrorState } from '@/components/ErrorState';
 import { LoadingState } from '@/components/LoadingState';
 import { Button } from '@/components/ui/button';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { api } from '@/lib/api';
 import { useAuthStore } from '@/stores/auth-store';
 
@@ -122,19 +123,21 @@ export function SystemOpsPage() {
           <Button variant="outline" onClick={() => globalPause.mutate(false)}>
             Resume automation
           </Button>
-          {!confirmBackup ? (
-            <Button onClick={() => setConfirmBackup(true)}>Trigger backup…</Button>
-          ) : (
-            <Button
-              variant="destructive"
-              onClick={() => backup.mutate()}
-              disabled={backup.isPending}
-            >
-              Confirm backup
-            </Button>
-          )}
+          <Button onClick={() => setConfirmBackup(true)}>Trigger backup…</Button>
         </div>
       </div>
+
+      <ConfirmDialog
+        open={confirmBackup}
+        onOpenChange={setConfirmBackup}
+        title="Trigger backup?"
+        description="This starts a system backup job. Type BACKUP to confirm."
+        confirmPhrase="BACKUP"
+        confirmLabel="Trigger backup"
+        variant="destructive"
+        pending={backup.isPending}
+        onConfirm={() => backup.mutate()}
+      />
 
       <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
         {Object.entries(components).map(([name, info]) => {

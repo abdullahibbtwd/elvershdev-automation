@@ -18,7 +18,9 @@
     "prisma:push": "prisma db push",
     "prisma:studio": "prisma studio",
     "social:verify": "ts-node -r tsconfig-paths/register scripts/verify-social-connectivity.ts",
-    "social:bootstrap-meta": "ts-node -r tsconfig-paths/register scripts/bootstrap-meta-env-channels.ts"
+    "social:bootstrap-meta": "ts-node -r tsconfig-paths/register scripts/bootstrap-meta-env-channels.ts",
+    "xai:verify": "ts-node -r tsconfig-paths/register scripts/verify-xai-video.ts",
+    "xai:verify:live": "ts-node -r tsconfig-paths/register scripts/verify-xai-video.ts --live"
   },
   "dependencies": {
     "@ai-video/shared": "workspace:*",

@@ -50,6 +50,9 @@ export class SeriesConfigService {
         defaultProductionLeadTimeMinutes: SERIES_DEFAULTS.defaultProductionLeadTimeMinutes,
         defaultPlannedEpisodeCount: SERIES_DEFAULTS.plannedEpisodeCount,
         defaultEpisodeDurationSeconds: SERIES_DEFAULTS.targetEpisodeDurationSeconds,
+        defaultStoryDurationSeconds: null,
+        defaultMaxClipDurationSeconds: SERIES_DEFAULTS.maxClipDurationSeconds,
+        defaultProductionFormat: SERIES_DEFAULTS.productionFormat,
         defaultReplacementTriggerEpisode: SERIES_DEFAULTS.replacementTriggerEpisode,
         maxConcurrentEpisodeProduction: SERIES_DEFAULTS.maxConcurrentEpisodeProduction,
         maxRetries: SERIES_DEFAULTS.maxRetries,
@@ -154,6 +157,15 @@ export class SeriesConfigService {
         ...(dto.defaultEpisodeDurationSeconds !== undefined
           ? { defaultEpisodeDurationSeconds: dto.defaultEpisodeDurationSeconds }
           : {}),
+        ...(dto.defaultStoryDurationSeconds !== undefined
+          ? { defaultStoryDurationSeconds: dto.defaultStoryDurationSeconds }
+          : {}),
+        ...(dto.defaultMaxClipDurationSeconds !== undefined
+          ? { defaultMaxClipDurationSeconds: dto.defaultMaxClipDurationSeconds }
+          : {}),
+        ...(dto.defaultProductionFormat !== undefined
+          ? { defaultProductionFormat: dto.defaultProductionFormat }
+          : {}),
         ...(dto.defaultReplacementTriggerEpisode !== undefined
           ? { defaultReplacementTriggerEpisode: dto.defaultReplacementTriggerEpisode }
           : {}),
@@ -197,9 +209,23 @@ export class SeriesConfigService {
           : {}),
         ...(dto.creativeSettings !== undefined
           ? {
-              creativeSettings: seriesCreativeSettingsSchema.parse(
-                dto.creativeSettings,
-              ) as Prisma.InputJsonValue,
+              creativeSettings: (() => {
+                const parsed = seriesCreativeSettingsSchema.safeParse(
+                  dto.creativeSettings,
+                );
+                if (!parsed.success) {
+                  const details = parsed.error.issues
+                    .map(
+                      (issue) =>
+                        `${issue.path.join('.') || 'creativeSettings'}: ${issue.message}`,
+                    )
+                    .join('; ');
+                  throw new BadRequestException(
+                    `Invalid creative settings — ${details}`,
+                  );
+                }
+                return parsed.data as Prisma.InputJsonValue;
+              })(),
             }
           : {}),
       },
@@ -210,6 +236,53 @@ export class SeriesConfigService {
       await this.lanes.syncEnabledFromConfig(userId, {
         morning: updated.morningLaneEnabled,
         evening: updated.eveningLaneEnabled,
+      });
+    }
+
+    // Keep lane duration columns aligned with Production settings so Plan Movie
+    // does not keep using stale 60s / 10-episode lane defaults.
+    const durationPatch: {
+      plannedEpisodeCount?: number;
+      targetEpisodeDurationSeconds?: number;
+      targetStoryDurationSeconds?: number | null;
+      maxClipDurationSeconds?: number;
+      productionFormat?: string;
+      replacementTriggerEpisode?: number;
+    } = {};
+    if (dto.defaultPlannedEpisodeCount !== undefined) {
+      durationPatch.plannedEpisodeCount = updated.defaultPlannedEpisodeCount;
+    }
+    if (dto.defaultEpisodeDurationSeconds !== undefined) {
+      durationPatch.targetEpisodeDurationSeconds = updated.defaultEpisodeDurationSeconds;
+    }
+    if (dto.defaultStoryDurationSeconds !== undefined) {
+      durationPatch.targetStoryDurationSeconds = updated.defaultStoryDurationSeconds;
+    }
+    if (dto.defaultMaxClipDurationSeconds !== undefined) {
+      durationPatch.maxClipDurationSeconds = updated.defaultMaxClipDurationSeconds;
+    }
+    if (dto.defaultProductionFormat !== undefined) {
+      durationPatch.productionFormat = updated.defaultProductionFormat;
+    }
+    if (
+      dto.defaultReplacementTriggerEpisode !== undefined ||
+      dto.defaultPlannedEpisodeCount !== undefined
+    ) {
+      const planned =
+        durationPatch.plannedEpisodeCount ?? updated.defaultPlannedEpisodeCount;
+      const trigger =
+        dto.defaultReplacementTriggerEpisode !== undefined
+          ? updated.defaultReplacementTriggerEpisode
+          : undefined;
+      durationPatch.replacementTriggerEpisode = Math.min(
+        Math.max(1, trigger ?? updated.defaultReplacementTriggerEpisode),
+        planned,
+      );
+    }
+    if (Object.keys(durationPatch).length > 0) {
+      await this.prisma.seriesLane.updateMany({
+        where: { userId, deletedAt: null },
+        data: durationPatch,
       });
     }
 

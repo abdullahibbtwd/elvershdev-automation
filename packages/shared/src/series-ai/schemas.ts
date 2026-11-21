@@ -12,8 +12,14 @@ export const movieArchitectBriefSchema = z.object({
     .min(2)
     .max(500)
     .default('Mature premium cinematic 3D animation, not children’s cartoon aesthetics'),
-  plannedEpisodeCount: z.number().int().min(2).max(120).default(10),
-  targetEpisodeDurationSeconds: z.number().int().min(15).max(600).default(60),
+  plannedEpisodeCount: z.number().int().min(1).max(120).default(10),
+  /** Individual episode duration — default 60s. Not complete-story or clip duration. */
+  targetEpisodeDurationSeconds: z.number().int().min(15).max(1800).default(60),
+  /** Complete story/movie duration. When set, drives episode count with episode duration. */
+  targetStoryDurationSeconds: z.number().int().min(15).max(3600).optional(),
+  /** Max Grok Lite clip length (≤15). */
+  maxClipDurationSeconds: z.number().int().min(1).max(15).default(15),
+  productionFormat: z.enum(['episodic', 'standalone']).default('episodic'),
   additionalInstructions: z.string().max(8000).optional(),
   /** Option B: user-supplied premise/concept the AI must expand into a full movie plan. */
   customPremise: z.string().max(12000).optional(),
@@ -42,6 +48,8 @@ export const seriesCharacterPlanSchema = z.object({
   role: z.enum(['PROTAGONIST', 'ANTAGONIST', 'SUPPORTING', 'CAMEO', 'NARRATOR']),
   species: z.string().min(1).max(100),
   ageRange: z.string().min(1).max(50),
+  genderPresentation: z.string().max(80).optional().default(''),
+  skinTone: z.string().max(120).optional().default(''),
   personality: z.string().min(1),
   motivation: z.string().min(1),
   backstory: z.string().min(1),
@@ -49,7 +57,9 @@ export const seriesCharacterPlanSchema = z.object({
   facialStructure: z.string().min(1),
   eyeColor: z.string().min(1).max(80),
   eyeShape: z.string().min(1).max(80),
+  hairstyle: z.string().max(200).optional().default(''),
   hairFurColor: z.string().min(1).max(120),
+  facialHair: z.string().max(200).optional().default(''),
   markings: z.string().min(1),
   bodyProportions: z.string().min(1),
   clothing: z.string().min(1),
